@@ -1,7 +1,6 @@
 # Central certificates service
 # Alex Monk <krenair@gmail.com>, May/June 2018
 import collections
-import flask
 import hashlib
 import os
 import signal
@@ -10,6 +9,8 @@ import tempfile
 import threading
 import time
 import traceback
+
+import flask
 import yaml
 
 import acme_tiny
@@ -133,7 +134,7 @@ def certificate_management():
                 try:
                     # TODO: make this check for /.well-known/acme-challenge file on % of authorised
                     # hosts
-                    signedCert = acme_tiny.get_crt(
+                    signed_cert = acme_tiny.get_crt(
                         '/etc/certcentral/acct.key',
                         csr,
                         '/etc/certcentral/http_challenges',
@@ -145,7 +146,7 @@ def certificate_management():
                         '{}.{}.public.pem'.format(cert_id, key_type_id)
                     )
                     with open(public_cert_path, 'w+b') as f:
-                        f.write(signedCert.encode('utf-8'))
+                        f.write(signed_cert.encode('utf-8'))
 
                     private_key_path = os.path.join(
                         '/etc/certcentral/live_certs',
@@ -231,4 +232,3 @@ def get_certs(certname=None, part=None, api=None):
 
 if __name__ == '__main__':
     app.run()
-

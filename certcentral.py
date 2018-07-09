@@ -19,48 +19,44 @@ This module is the main source code behind Wikimedia's central certificates serv
 A description of it can be found at https://phabricator.wikimedia.org/T194962
 """
 import collections
+import datetime
 import hashlib
 import os
 import signal
-import subprocess
 import tempfile
 import threading
 import time
 import traceback
 
+from cryptography.hazmat.primitives.asymmetric import ec
 import flask
 import yaml
 
 import acme_tiny
 
-
-# some of this is borrowed from acme-setup
-def check_output_errtext(args):
-    """exec args, returns (stdout,stderr). raises on rv!=0 w/ stderr in msg"""
-    proc = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    (p_out, p_err) = proc.communicate()
-    if proc.returncode != 0:
-        raise Exception("Command >>%s<< failed, exit code %i, stderr:\n%s"
-                        % (" ".join(args), proc.returncode, p_err))
-    return (p_out, p_err)
-
-
-EC_PRIME256V1_PARAMFILE = '/etc/certcentral/prime256v1.ecparams'
-check_output_errtext(['openssl', 'ecparam', '-name', 'prime256v1', '-out', EC_PRIME256V1_PARAMFILE])
-KEY_TYPES = {
-    'rsa-2048': {
-        'algorithm': 'rsa',
-        'options': {'rsa_keygen_bits': '2048'},
-        'req-newkey': '2048'
-    },
-    'ec-prime256v1': {
-        'algorithm': 'ec',
-        'options': {'ec_paramgen_curve': 'prime256v1'},
-        'req-newkey': EC_PRIME256V1_PARAMFILE
-    }
-}
+from x509 import (
+    CertificateSigningRequest,
+    ECPrivateKey,
+    RSAPrivateKey,
+    SelfSignedCertificate,
+)
 
 app = flask.Flask(__name__)  # pylint: disable=invalid-name
+
+KEY_TYPES = {
+    'ec-prime256v1': {
+        'class': ECPrivateKey,
+        'params': {
+            'curve': ec.SECP256R1,
+        }
+    },
+    'rsa-2048': {
+        'class': RSAPrivateKey,
+        'params': {
+            'size': 2048,
+        }
+    }
+}
 
 
 class CertCentral():
@@ -78,7 +74,9 @@ class CertCentral():
         """
         Starts up the certificate management and HTTP listener threads.
         """
-        check_output_errtext(['openssl', 'genrsa', '-out', '/etc/certcentral/acct.key', '2048'])
+        acct_key = RSAPrivateKey()
+        acct_key.generate()
+        acct_key.save('/etc/certcentral/acct.key')   # TODO: Do we really need to generate this key on every start-up?
         self.create_initial_certs()
         threading.Thread(
             target=self.certificate_management,
@@ -115,41 +113,20 @@ class CertCentral():
                 private_key_filename = '{}.{}.private.pem'.format(cert_id, key_type_id)
                 private_key_file = os.path.join('/etc/certcentral/live_certs', private_key_filename)
                 if not os.path.exists(public_key_file) or not os.path.exists(private_key_file):
-                    newkey_param = '{}:{}'.format(
-                        key_type_details['algorithm'],
-                        key_type_details['req-newkey']
+                    key = key_type_details['class']()
+                    key.generate(**key_type_details['params'])
+                    key.save(private_key_filename)
+
+                    cert = SelfSignedCertificate(
+                        private_key=key,
+                        common_name="Snakeoil cert",
+                        sans=(),
+                        from_date=datetime.datetime.utcnow(),
+                        until_date=datetime.datetime.utcnow() + datetime.timedelta(days=3),
                     )
-                    check_output_errtext([
-                        "openssl", "req",
-                        "-nodes",
-                        "-new",
-                        "-newkey", newkey_param,
-                        "-x509",
-                        "-keyout", private_key_file,
-                        "-out", public_key_file,
-                        "-subj", "/CN=Snakeoil cert"
-                    ])
+                    cert.save(public_key_file)
 
-    @staticmethod
-    def generate_private_key(fname, key_type_details):
-        """
-        Generates a private key at a given file name using the algorithm and options provided in
-        key_type_details, which is a dict containing 'algorithm' and 'options' keys.
-        'algorithm' will be passed as a string into openssl genpkey -algorithm
-        'options' is a dictionary that will be converted into strings to give to openssl genpkey
-        -pkeyopt
-        """
-        keygen_cmd = [
-            'openssl', 'genpkey',
-            '-out', fname,
-            '-algorithm', key_type_details['algorithm']
-        ]
-        for opt_key, opt_val in key_type_details['options'].items():
-            keygen_cmd.append('-pkeyopt')
-            keygen_cmd.append('{}:{}'.format(opt_key, opt_val))
-        check_output_errtext(keygen_cmd)
-
-    def certificate_management(self):
+    def certificate_management(self):  # pylint: disable=too-many-locals
         """
         This functions is started in a thread to perform regular tasks.
         It will begin attempting to request real certificates from the certificate authority.
@@ -164,29 +141,18 @@ class CertCentral():
                         continue
                     # some of this is borrowed from acme-setup too
                     temp_private_key = tempfile.NamedTemporaryFile()
-                    self.generate_private_key(temp_private_key.name, key_type_details)
+                    private_key = key_type_details['class']()
+                    private_key.generate(**key_type_details['params'])
+                    private_key.save(temp_private_key.name)
+
                     csr_filename = '{}.{}.csr.pem'.format(cert_id, key_type_id)
-                    csr = os.path.join('/etc/certcentral/csrs', csr_filename)
-                    with tempfile.NamedTemporaryFile() as cfg:
-                        cfg.write('\n'.join([
-                            '[req]',
-                            'distinguished_name=req_dn',
-                            'req_extensions=SAN',
-                            'prompt=no',
-                            '[req_dn]',
-                            'commonName=' + cert_details['CN'],
-                            '[SAN]',
-                            'subjectAltName=' + ','.join(['DNS:' + s for s in cert_details['SNI']]),
-                        ]).encode('utf-8'))
-                        cfg.flush()
-                        check_output_errtext([
-                            'openssl', 'req',
-                            '-new',
-                            '-sha256',
-                            '-out', csr,
-                            '-key', temp_private_key.name,
-                            '-config', cfg.name
-                        ])
+                    csr_fullpath = os.path.join('/etc/certcentral/csrs', csr_filename)
+                    csr = CertificateSigningRequest(
+                        private_key=private_key,
+                        common_name=cert_details['CN'],
+                        sans=cert_details['SNI'],
+                    )
+                    csr.save(csr_fullpath)
                     # TODO: do ACME v2 DNS wildcard requests and write challenges to
                     # dns_challenges/{domain}
                     try:
@@ -194,7 +160,7 @@ class CertCentral():
                         # authorised hosts
                         signed_cert = acme_tiny.get_crt(
                             '/etc/certcentral/acct.key',
-                            csr,
+                            csr_fullpath,
                             '/etc/certcentral/http_challenges',
                             CA='https://acme-staging.api.letsencrypt.org'
                         )

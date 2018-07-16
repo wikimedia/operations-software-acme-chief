@@ -43,6 +43,7 @@ from x509 import (
 
 app = flask.Flask(__name__)  # pylint: disable=invalid-name
 
+BASEPATH = '/etc/certcentral'
 KEY_TYPES = {
     'ec-prime256v1': {
         'class': ECPrivateKey,
@@ -64,7 +65,20 @@ class CertCentral():
     This class just acts as a container for all the methods and state - config and authorised hosts
     data.
     """
-    def __init__(self):
+    live_certs_path = 'live_certs'
+    account_key_path = 'acct.key'
+    csrs_path = 'csrs'
+    config_path = 'config.yaml'
+    confd_path = 'conf.d'
+    http_challenges_path = 'http_challenges'
+
+    def __init__(self, base_path=BASEPATH):
+        self.live_certs_path = os.path.join(base_path, CertCentral.live_certs_path)
+        self.account_key_path = os.path.join(base_path, CertCentral.account_key_path)
+        self.csrs_path = os.path.join(base_path, CertCentral.csrs_path)
+        self.config_path = os.path.join(base_path, CertCentral.config_path)
+        self.confd_path = os.path.join(base_path, CertCentral.confd_path)
+        self.http_challenges_path = os.path.join(base_path, CertCentral.http_challenges_path)
         self.config = None
         self.authorised_hosts = None
         signal.signal(signal.SIGHUP, self.sighup_handler)
@@ -76,7 +90,7 @@ class CertCentral():
         """
         acct_key = RSAPrivateKey()
         acct_key.generate()
-        acct_key.save('/etc/certcentral/acct.key')   # TODO: Do we really need to generate this key on every start-up?
+        acct_key.save(self.account_key_path)   # TODO: Do we really need to generate this key on every start-up?
         self.create_initial_certs()
         threading.Thread(
             target=self.certificate_management,
@@ -90,11 +104,11 @@ class CertCentral():
         authorised hosts data.
         It is also called once at the beginning to perform initial setup.
         """
-        with open('/etc/certcentral/config.yaml') as config_f:
+        with open(self.config_path) as config_f:
             self.config = yaml.safe_load(config_f)
         temp_authorised_hosts = collections.defaultdict(list)
-        for fname in os.listdir('/etc/certcentral/conf.d'):
-            with open('/etc/certcentral/conf.d/{}'.format(fname)) as conf_f:
+        for fname in os.listdir(self.confd_path):
+            with open(os.path.join(self.confd_path, fname)) as conf_f:
                 conf_data = yaml.safe_load(conf_f)
                 temp_authorised_hosts[conf_data['certname']].append(conf_data['hostname'])
         self.authorised_hosts = temp_authorised_hosts
@@ -109,9 +123,9 @@ class CertCentral():
         for cert_id in self.config:
             for key_type_id, key_type_details in KEY_TYPES.items():
                 public_key_filename = '{}.{}.public.pem'.format(cert_id, key_type_id)
-                public_key_file = os.path.join('/etc/certcentral/live_certs', public_key_filename)
+                public_key_file = os.path.join(self.live_certs_path, public_key_filename)
                 private_key_filename = '{}.{}.private.pem'.format(cert_id, key_type_id)
-                private_key_file = os.path.join('/etc/certcentral/live_certs', private_key_filename)
+                private_key_file = os.path.join(self.live_certs_path, private_key_filename)
                 if not os.path.exists(public_key_file) or not os.path.exists(private_key_file):
                     key = key_type_details['class']()
                     key.generate(**key_type_details['params'])
@@ -146,7 +160,7 @@ class CertCentral():
                     private_key.save(temp_private_key.name)
 
                     csr_filename = '{}.{}.csr.pem'.format(cert_id, key_type_id)
-                    csr_fullpath = os.path.join('/etc/certcentral/csrs', csr_filename)
+                    csr_fullpath = os.path.join(self.csrs_path, csr_filename)
                     csr = CertificateSigningRequest(
                         private_key=private_key,
                         common_name=cert_details['CN'],
@@ -159,21 +173,21 @@ class CertCentral():
                         # TODO: make this check for /.well-known/acme-challenge file on % of
                         # authorised hosts
                         signed_cert = acme_tiny.get_crt(
-                            '/etc/certcentral/acct.key',
+                            self.account_key_path,
                             csr_fullpath,
-                            '/etc/certcentral/http_challenges',
+                            self.http_challenges_path,
                             CA='https://acme-staging.api.letsencrypt.org'
                         )
 
                         public_cert_path = os.path.join(
-                            '/etc/certcentral/live_certs',
+                            self.live_certs_path,
                             '{}.{}.public.pem'.format(cert_id, key_type_id)
                         )
                         with open(public_cert_path, 'w+b') as public_cert_f:
                             public_cert_f.write(signed_cert.encode('utf-8'))
 
                         private_key_path = os.path.join(
-                            '/etc/certcentral/live_certs',
+                            self.live_certs_path,
                             '{}.{}.private.pem'.format(cert_id, key_type_id)
                         )
                         with open(private_key_path, 'w+b') as private_key_f:
@@ -227,7 +241,8 @@ class CertCentral():
         if client_dn not in self.authorised_hosts[certname]:
             return 'gtfo', 403
 
-        fpath = '/etc/certcentral/live_certs/{}.{}'.format(certname, part)
+        fname = '{}.{}'.format(certname, part)
+        fpath = os.path.join(self.live_certs_path, fname)
         with open(fpath, 'rb') as requested_f:
             file_contents = requested_f.read()
 

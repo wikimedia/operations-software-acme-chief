@@ -4,23 +4,48 @@ Module containing x509 helper classes
 Valentin Gutierrez <vgutierrez@wikimedia.org> 2018
 """
 import abc
+import hashlib
 import ipaddress
 import os
 import stat
-from datetime import datetime
+from datetime import datetime, timedelta
+from enum import Enum
 
-from cryptography import x509
+from cryptography import x509 as crypto_x509
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec, rsa
-from cryptography.x509.oid import NameOID
+from cryptography.x509.oid import ExtensionOID, NameOID
 
 CRYPTOGRAPHY_BACKEND = default_backend()
 DEFAULT_RSA_KEY_SIZE = 2048
 DEFAULT_RSA_PUBLIC_EXPONENT = 65537
 DEFAULT_SIGNATURE_ALGORITHM = hashes.SHA256()
 DEFAULT_EC_CURVE = ec.SECP256R1  # pylint: disable=invalid-name
+DEFAULT_RENEWAL_PERIOD = timedelta(days=30)
 OPENER_MODE = 0o600
+PEM_HEADER_AND_FOOTER_LEN = 52
+
+
+class X509Error(Exception):
+    """Base exception class for the X509 module"""
+
+
+class CertificateRevokeReason(Enum):
+    """
+    Certificate revoke reason codes as defined in
+    RFC 5280 5.3.1
+    """
+    UNSPECIFIED = 0
+    KEY_COMPROMISE = 1
+    CA_COMPROMISE = 2
+    AFFILIATION_CHANGED = 3
+    SUPERSEDED = 4
+    CESSATION_OF_OPERATION = 5
+    CERTIFICATE_HOLD = 6
+    REMOVE_FROM_CRL = 8
+    PRIVILEGE_WITHDRAWN = 9
+    AA_COMPROMISE = 10
 
 
 def secure_opener(path, flags):
@@ -70,6 +95,14 @@ class PrivateKey(abc.ABC):
     @abc.abstractmethod
     def generate(self, **kwargs):
         """Generates a new private key"""
+
+    @property
+    def public_pem(self):
+        """Returns the PEM of the public key"""
+        return self.key.public_key().public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo,
+        )
 
     def save(self, filename):
         """Persists the private key on disk"""
@@ -129,8 +162,8 @@ class BaseX509Builder(object):
             raise TypeError("SANs must be a tuple or a list")
 
         self.private_key = private_key
-        self.common_name = x509.Name([
-            x509.NameAttribute(NameOID.COMMON_NAME, common_name),
+        self.common_name = crypto_x509.Name([
+            crypto_x509.NameAttribute(NameOID.COMMON_NAME, common_name),
         ])
 
         self._builder = builder.subject_name(self.common_name)
@@ -146,16 +179,17 @@ class BaseX509Builder(object):
         x509_names = []
         for san in sans:
             if isinstance(san, str):
-                x509_names.append(x509.DNSName(san))
+                x509_names.append(crypto_x509.DNSName(san))
             elif isinstance(san, (ipaddress.IPv4Address, ipaddress.IPv6Address)):
-                x509_names.append(x509.IPAddress(san))
+                x509_names.append(crypto_x509.IPAddress(san))
         if x509_names:
-            self._builder = self._builder.add_extension(x509.SubjectAlternativeName(x509_names), critical=False)
+            self._builder = self._builder.add_extension(crypto_x509.SubjectAlternativeName(x509_names),
+                                                        critical=False)
 
     def save(self, filename):
         """Persists the x509 document on disk after being signed"""
         with open(filename, 'wb', opener=secure_opener) as pem_file:
-            pem_file.write(self.sign().public_bytes(encoding=serialization.Encoding.PEM))
+            pem_file.write(self.pem)
 
     def sign(self):
         """Signs the element being built with self.private_key using the DEFAULT_SIGNATURE algorithm"""
@@ -165,29 +199,45 @@ class BaseX509Builder(object):
             backend=CRYPTOGRAPHY_BACKEND,
         )
 
+    @property
+    def pem(self):
+        """Returns the X.509 object serialized as a PEM"""
+        return self.sign().public_bytes(encoding=serialization.Encoding.PEM)
+
 
 class CertificateSigningRequest(BaseX509Builder):
     """Certificate Signing Request (CSR) generator"""
     def __init__(self, private_key, common_name, sans):
-        super().__init__(x509.CertificateSigningRequestBuilder(), private_key, common_name, sans)
+        super().__init__(crypto_x509.CertificateSigningRequestBuilder(), private_key, common_name, sans)
+        self.wildcard = self._find_wildcard()
+        self.csr_id = hashlib.md5(self.pem).hexdigest()
 
     @property
     def request(self):
         """Signed CSR"""
         return self.sign()
 
+    def _find_wildcard(self):
+        """Returns true if a wildcard SAN is found, false otherwise"""
+        sans = self.request.extensions.get_extension_for_oid(ExtensionOID.SUBJECT_ALTERNATIVE_NAME)
+        dns_names = sans.value.get_values_for_type(crypto_x509.DNSName)
+        for dns_name in dns_names:
+            if dns_name.startswith('*.'):
+                return True
+        return False
+
 
 class SelfSignedCertificate(BaseX509Builder):
     """Self Signed Certificate generator"""
     def __init__(self, private_key, common_name, sans, from_date, until_date):
-        super().__init__(x509.CertificateBuilder(), private_key, common_name, sans)
+        super().__init__(crypto_x509.CertificateBuilder(), private_key, common_name, sans)
 
         if not (isinstance(from_date, datetime) and isinstance(until_date, datetime)):
             raise TypeError("from_date/until_date parameters must be datetime.datetime instances")
 
         self._builder = self._builder.issuer_name(self.common_name)
         self._builder = self._builder.public_key(self.private_key.key.public_key())
-        self._builder = self._builder.serial_number(x509.random_serial_number())
+        self._builder = self._builder.serial_number(crypto_x509.random_serial_number())
         self._builder = self._builder.not_valid_before(from_date)
         self._builder = self._builder.not_valid_after(until_date)
 
@@ -195,3 +245,53 @@ class SelfSignedCertificate(BaseX509Builder):
     def certificate(self):
         """self signed certificate"""
         return self.sign()
+
+
+class Certificate:
+    """X.509 certificate"""
+    def __init__(self, pem, parse_chain=True):
+        try:
+            self.certificate = crypto_x509.load_pem_x509_certificate(pem, CRYPTOGRAPHY_BACKEND)
+        except (TypeError, ValueError) as load_pem_error:
+            raise X509Error('Unable to parse PEM') from load_pem_error
+
+        self.chain = [self]
+        if parse_chain:
+            self._parse_chain_pem(pem[len(self.pem):].lstrip())
+
+    def _parse_chain_pem(self, pem):
+        len_pem = len(pem)
+        if len_pem <= PEM_HEADER_AND_FOOTER_LEN:
+            return
+
+        self.chain.append(Certificate(pem, parse_chain=False))
+        len_last_pem = len(self.chain[-1].pem)
+        if len_pem - len_last_pem > PEM_HEADER_AND_FOOTER_LEN:
+            self._parse_chain_pem(pem[len_last_pem:].lstrip())
+
+    @staticmethod
+    def load(path):
+        """Loads the certificate from a PEM on disk"""
+        with open(path, 'rb') as pem_file:
+            return Certificate(pem_file.read())
+
+    @property
+    def pem(self):
+        """Returns the certificate serialized as a PEM"""
+        return self.certificate.public_bytes(encoding=serialization.Encoding.PEM)
+
+    def save(self, path, full_chain=False):
+        """Persists the certificate on disk serializad as a PEM"""
+        with open(path, 'wb') as pem_file:
+            for cert in self.chain:
+                pem_file.write(cert.pem)
+                if not full_chain:
+                    break
+
+    def needs_renew(self, renewal_period=DEFAULT_RENEWAL_PERIOD):
+        """Returns True if the certificate needs to be renewed"""
+        now = datetime.utcnow()
+        if renewal_period > (self.certificate.not_valid_after - now):
+            return True
+
+        return False

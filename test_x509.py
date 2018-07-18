@@ -6,15 +6,15 @@ import tempfile
 import unittest
 from unittest import mock
 
-from cryptography import x509
+from cryptography import x509 as crypto_x509
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec, rsa
 from cryptography.x509.oid import ExtensionOID, NameOID
 
 from x509 import (DEFAULT_EC_CURVE, DEFAULT_RSA_KEY_SIZE, OPENER_MODE,
-                  CertificateSigningRequest, ECPrivateKey, PrivateKey,
-                  PrivateKeyLoader, RSAPrivateKey, SelfSignedCertificate,
-                  secure_opener)
+                  Certificate, CertificateSigningRequest, ECPrivateKey,
+                  PrivateKey, PrivateKeyLoader, RSAPrivateKey,
+                  SelfSignedCertificate, secure_opener)
 
 RSA_TEST_KEY = '''
 -----BEGIN RSA PRIVATE KEY-----
@@ -53,6 +53,21 @@ AwEHoUQDQgAEe635B78GCi84ub06L1Ow9OXKaIc63k4SRzFSGyJ1AXg6VxQBeeXt
 r7o8yXlWBLv89THLlzqSKCC/bw1DpngsGg==
 -----END EC PRIVATE KEY-----
 '''
+
+def get_self_signed_certificate(from_date, until_date):
+    pk = RSAPrivateKey()
+    pk.generate()
+    return SelfSignedCertificate(
+        private_key=pk,
+        common_name="certcentral.test",
+        sans=(
+            '*.certcentral.test',
+            ipaddress.IPv4Address('127.0.0.1'),
+            ipaddress.IPv6Address('::1'),
+        ),
+        from_date=from_date,
+        until_date=until_date,
+    )
 
 class PrivateKeyTest(unittest.TestCase):
     def test_key_generation(self):
@@ -134,49 +149,55 @@ class CertificateSigningRequestTest(unittest.TestCase):
             ),
         )
 
-        self.assertIsInstance(csr.request, x509.CertificateSigningRequest)
+        self.assertIsInstance(csr.request, crypto_x509.CertificateSigningRequest)
         self.assertIsInstance(csr.request.signature_hash_algorithm, hashes.SHA256)
         self.assertTrue(csr.request.is_signature_valid)
         cn = csr.request.subject.get_attributes_for_oid(NameOID.COMMON_NAME)
         self.assertEqual(len(cn), 1)
         self.assertEqual(cn[0].value, "certcentral.test")
         sans = csr.request.extensions.get_extension_for_oid(ExtensionOID.SUBJECT_ALTERNATIVE_NAME)
-        self.assertEqual(sans.value.get_values_for_type(x509.DNSName), ['*.certcentral.test'])
+        self.assertEqual(sans.value.get_values_for_type(crypto_x509.DNSName), ['*.certcentral.test'])
         self.assertEqual(
-            sans.value.get_values_for_type(x509.IPAddress),
+            sans.value.get_values_for_type(crypto_x509.IPAddress),
             [ipaddress.IPv4Address('127.0.0.1'), ipaddress.IPv6Address('::1')]
         )
+        self.assertTrue(csr.wildcard)
 
 
 class SelfSignedCertificateTest(unittest.TestCase):
     def test_cert_generation(self):
-        pk = RSAPrivateKey()
-        pk.generate()
         from_date = datetime.datetime.utcnow()
         until_date = from_date + datetime.timedelta(days=30)
-        cert = SelfSignedCertificate(
-            private_key=pk,
-            common_name="certcentral.test",
-            sans=(
-                '*.certcentral.test',
-                ipaddress.IPv4Address('127.0.0.1'),
-                ipaddress.IPv6Address('::1'),
-            ),
-            from_date=from_date,
-            until_date=until_date,
-        )
+        cert = get_self_signed_certificate(from_date, until_date)
 
-        self.assertIsInstance(cert.certificate, x509.Certificate)
+        self.assertIsInstance(cert.certificate, crypto_x509.Certificate)
         self.assertIsInstance(cert.certificate.signature_hash_algorithm, hashes.SHA256)
         cn = cert.certificate.subject.get_attributes_for_oid(NameOID.COMMON_NAME)
         self.assertEqual(len(cn), 1)
         self.assertEqual(cn[0].value, "certcentral.test")
         sans = cert.certificate.extensions.get_extension_for_oid(ExtensionOID.SUBJECT_ALTERNATIVE_NAME)
-        self.assertEqual(sans.value.get_values_for_type(x509.DNSName), ['*.certcentral.test'])
+        self.assertEqual(sans.value.get_values_for_type(crypto_x509.DNSName), ['*.certcentral.test'])
         self.assertEqual(
-            sans.value.get_values_for_type(x509.IPAddress),
+            sans.value.get_values_for_type(crypto_x509.IPAddress),
             [ipaddress.IPv4Address('127.0.0.1'), ipaddress.IPv6Address('::1')]
         )
 
         self.assertEqual(cert.certificate.not_valid_before, from_date.replace(microsecond=0))
         self.assertEqual(cert.certificate.not_valid_after, until_date.replace(microsecond=0))
+
+
+class CertificateTest(unittest.TestCase):
+    def test_certificate(self):
+        from_date = datetime.datetime.utcnow()
+        until_date = from_date + datetime.timedelta(days=90)
+        initial_cert = get_self_signed_certificate(from_date, until_date)
+
+        cert = Certificate(initial_cert.pem)
+        self.assertIsInstance(cert.certificate, crypto_x509.Certificate)
+        self.assertEqual(cert.chain, [cert])
+        self.assertFalse(cert.needs_renew())
+        mocked_now = until_date - datetime.timedelta(days=10)
+        with mock.patch('x509.datetime') as mocked_datetime:
+            mocked_datetime.utcnow = mock.Mock(return_value=mocked_now)
+            self.assertTrue(cert.needs_renew())
+

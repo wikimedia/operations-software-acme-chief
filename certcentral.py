@@ -96,7 +96,6 @@ class CertCentral():
             target=self.certificate_management,
             name="Issue and renew certificates"
         ).start()
-        app.run()
 
     def sighup_handler(self, *_):
         """
@@ -199,8 +198,6 @@ class CertCentral():
                     temp_private_key.close()
                 time.sleep(5)
 
-    @app.route("/certs/<certname>/<part>")
-    @app.route("/puppet/v3/file_<api>/acmedata/<certname>/<part>")
     def get_certs(self, certname=None, part=None, api=None):  # pylint: disable=too-many-return-statements
         """
         This is the function that gets called whenever a server asks us for a certificate.
@@ -246,7 +243,7 @@ class CertCentral():
         with open(fpath, 'rb') as requested_f:
             file_contents = requested_f.read()
 
-        assert flask.request.args.get('environment') == 'production'
+        assert flask.request.args.get('environment') in ['production', None]
         if api == 'metadata':
             assert flask.request.args.get('checksum_type') == 'md5'
             assert flask.request.args.get('links') == 'manage'
@@ -271,5 +268,19 @@ class CertCentral():
             return file_contents
 
 
+cert_manager = CertCentral()  # pylint: disable=invalid-name
+
+
+@app.route("/certs/<certname>/<part>")
+@app.route("/puppet/v3/file_<api>/acmedata/<certname>/<part>")
+def get_certs(certname=None, part=None, api=None):
+    """
+    Passes through to CertCentral.get_certs, as app.route can't handle the self
+    parameter.
+    """
+    return cert_manager.get_certs(certname, part, api)
+
+
 if __name__ == '__main__':
-    CertCentral().run()
+    cert_manager.run()
+    app.run()

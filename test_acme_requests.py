@@ -177,6 +177,7 @@ class ACMEIntegrationTests(unittest.TestCase):
             certificate = session.get_certificate(csr.csr_id)
         self.assertFalse(session.orders)
         self.assertFalse(certificate.needs_renew())
+        self.assertFalse(certificate.self_signed)
         self.assertEqual(len(certificate.chain), 2)
         sans = certificate.certificate.extensions.get_extension_for_oid(ExtensionOID.SUBJECT_ALTERNATIVE_NAME)
         self.assertEqual(sans.value.get_values_for_type(crypto_x509.DNSName),
@@ -213,6 +214,7 @@ class ACMEIntegrationTests(unittest.TestCase):
             certificate = session.get_certificate(csr.csr_id)
         self.assertFalse(session.orders)
         self.assertFalse(certificate.needs_renew())
+        self.assertFalse(certificate.self_signed)
         self.assertEqual(len(certificate.chain), 2)
         sans = certificate.certificate.extensions.get_extension_for_oid(ExtensionOID.SUBJECT_ALTERNATIVE_NAME)
         self.assertEqual(sans.value.get_values_for_type(crypto_x509.DNSName), ['tests.wmflabs.org'])
@@ -248,6 +250,7 @@ class ACMEIntegrationTests(unittest.TestCase):
             certificate = session.get_certificate(csr.csr_id)
         self.assertFalse(session.orders)
         self.assertFalse(certificate.needs_renew())
+        self.assertFalse(certificate.self_signed)
         self.assertEqual(len(certificate.chain), 2)
         sans = certificate.certificate.extensions.get_extension_for_oid(ExtensionOID.SUBJECT_ALTERNATIVE_NAME)
         self.assertEqual(sans.value.get_values_for_type(crypto_x509.DNSName),

@@ -206,6 +206,7 @@ class CertificateTest(unittest.TestCase):
         self.assertIsInstance(cert.certificate, crypto_x509.Certificate)
         self.assertEqual(cert.chain, [cert])
         self.assertFalse(cert.needs_renew())
+        self.assertTrue(cert.self_signed)
         mocked_now = until_date - datetime.timedelta(days=10)
         with mock.patch('x509.datetime') as mocked_datetime:
             mocked_datetime.utcnow = mock.Mock(return_value=mocked_now)

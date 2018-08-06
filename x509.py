@@ -285,6 +285,11 @@ class Certificate:
         """Returns the certificate serialized as a PEM"""
         return self.certificate.public_bytes(encoding=serialization.Encoding.PEM)
 
+    @property
+    def self_signed(self):
+        """Returns True if the certificate is self signed, False otherwise"""
+        return self.certificate.issuer == self.certificate.subject
+
     def save(self, path, full_chain=False):
         """Persists the certificate on disk serializad as a PEM"""
         with open(path, 'wb') as pem_file:

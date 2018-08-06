@@ -163,6 +163,16 @@ class CertificateSigningRequestTest(unittest.TestCase):
         )
         self.assertTrue(csr.wildcard)
 
+    def test_csr_without_sans(self):
+        pk = RSAPrivateKey()
+        pk.generate()
+        csr = CertificateSigningRequest(
+            private_key=pk,
+            common_name="certcentral.test",
+            sans=(),
+        )
+        self.assertFalse(csr.wildcard)
+
 
 class SelfSignedCertificateTest(unittest.TestCase):
     def test_cert_generation(self):

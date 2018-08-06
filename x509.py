@@ -15,6 +15,7 @@ from cryptography import x509 as crypto_x509
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec, rsa
+from cryptography.x509.extensions import ExtensionNotFound
 from cryptography.x509.oid import ExtensionOID, NameOID
 
 CRYPTOGRAPHY_BACKEND = default_backend()
@@ -219,7 +220,11 @@ class CertificateSigningRequest(BaseX509Builder):
 
     def _find_wildcard(self):
         """Returns true if a wildcard SAN is found, false otherwise"""
-        sans = self.request.extensions.get_extension_for_oid(ExtensionOID.SUBJECT_ALTERNATIVE_NAME)
+        try:
+            sans = self.request.extensions.get_extension_for_oid(ExtensionOID.SUBJECT_ALTERNATIVE_NAME)
+        except ExtensionNotFound:
+            return False
+
         dns_names = sans.value.get_values_for_type(crypto_x509.DNSName)
         for dns_name in dns_names:
             if dns_name.startswith('*.'):

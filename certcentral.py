@@ -60,9 +60,51 @@ KEY_TYPES = {
 }
 
 
+class CertCentralConfig:
+    """Class representing CertCentral configuration"""
+    def __init__(self, *, accounts, certificates, default_account, authorized_hosts):
+        self.accounts = accounts
+        self.certificates = certificates
+        self.default_account = default_account
+        self.authorized_hosts = authorized_hosts
+
+    @staticmethod
+    def load(file_name, confd_path=None):
+        """Load a config from the specified file_name and an optional conf.d path"""
+        if confd_path is None:
+            confd_path = os.path.dirname(file_name)
+
+        with open(file_name) as config_file:
+            config = yaml.safe_load(config_file)
+
+        default_account = CertCentralConfig._get_default_account(config['accounts'])
+
+        authorized_hosts = collections.defaultdict(list)
+        for fname in os.listdir(confd_path):
+            with open(os.path.join(confd_path, fname)) as conf_f:
+                conf_data = yaml.safe_load(conf_f)
+                if conf_data['certname'] not in config['certificates']:
+                    # TODO: log a warning
+                    continue
+                authorized_hosts[conf_data['certname']].append(conf_data['hostname'])
+
+        return CertCentralConfig(accounts=config['accounts'],
+                                 certificates=config['certificates'],
+                                 default_account=default_account,
+                                 authorized_hosts=authorized_hosts)
+
+    @staticmethod
+    def _get_default_account(accounts):
+        for account in accounts:
+            if 'default' in account and account['default'] is True:
+                return account['id']
+
+        return accounts[0]['id']
+
+
 class CertCentral():
     """
-    This class just acts as a container for all the methods and state - config and authorised hosts
+    This class just acts as a container for all the methods and state - config and authorized hosts
     data.
     """
     live_certs_path = 'live_certs'
@@ -80,7 +122,6 @@ class CertCentral():
         self.confd_path = os.path.join(base_path, CertCentral.confd_path)
         self.http_challenges_path = os.path.join(base_path, CertCentral.http_challenges_path)
         self.config = None
-        self.authorised_hosts = None
         signal.signal(signal.SIGHUP, self.sighup_handler)
         self.sighup_handler()
 
@@ -100,17 +141,10 @@ class CertCentral():
     def sighup_handler(self, *_):
         """
         This is called whenever our process receives SIGHUP signals, it reloads our config and
-        authorised hosts data.
+        authorized hosts data.
         It is also called once at the beginning to perform initial setup.
         """
-        with open(self.config_path) as config_f:
-            self.config = yaml.safe_load(config_f)
-        temp_authorised_hosts = collections.defaultdict(list)
-        for fname in os.listdir(self.confd_path):
-            with open(os.path.join(self.confd_path, fname)) as conf_f:
-                conf_data = yaml.safe_load(conf_f)
-                temp_authorised_hosts[conf_data['certname']].append(conf_data['hostname'])
-        self.authorised_hosts = temp_authorised_hosts
+        self.config = CertCentralConfig.load(file_name=self.config_path, confd_path=self.confd_path)
 
     def create_initial_certs(self):
         """
@@ -119,7 +153,7 @@ class CertCentral():
         begin serving traffic so they can forward ACME challenges through to us - that will enable
         us to request a real certificate to replace our initial one.
         """
-        for cert_id in self.config:
+        for cert_id in self.config.certificates:
             for key_type_id, key_type_details in KEY_TYPES.items():
                 public_key_filename = '{}.{}.public.pem'.format(cert_id, key_type_id)
                 public_key_file = os.path.join(self.live_certs_path, public_key_filename)
@@ -148,7 +182,7 @@ class CertCentral():
         # TODO: make this go through certs and renew where necessary
         have_certs = set()
         while True:
-            for cert_id, cert_details in self.config.items():
+            for cert_id, cert_details in self.config.certificates.items():
                 for key_type_id, key_type_details in KEY_TYPES.items():
                     if (cert_id, key_type_id) in have_certs:
                         continue
@@ -170,7 +204,7 @@ class CertCentral():
                     # dns_challenges/{domain}
                     try:
                         # TODO: make this check for /.well-known/acme-challenge file on % of
-                        # authorised hosts
+                        # authorized hosts
                         signed_cert = acme_tiny.get_crt(
                             self.account_key_path,
                             csr_fullpath,
@@ -206,7 +240,7 @@ class CertCentral():
         For Puppet, it can also produce metadata about the file, including the path on our system,
         owner, group, mode, and an MD5 hash of the file contents.
         This function is responsible for checking the X_CLIENT_DN header given by Nginx corresponds
-        to a hostname that has been authorised for access to the certificate it is requesting.
+        to a hostname that has been authorized for access to the certificate it is requesting.
         """
         if api is not None and api not in ['metadata', 'content']:
             return 'invalid puppet API call', 400
@@ -232,10 +266,10 @@ class CertCentral():
             part
         ))
 
-        if certname not in self.config:
+        if certname not in self.config.certificates:
             return 'no such certname', 404
 
-        if client_dn not in self.authorised_hosts[certname]:
+        if client_dn not in self.config.authorized_hosts[certname]:
             return 'gtfo', 403
 
         fname = '{}.{}'.format(certname, part)
@@ -268,9 +302,6 @@ class CertCentral():
             return file_contents
 
 
-cert_manager = CertCentral()  # pylint: disable=invalid-name
-
-
 @app.route("/certs/<certname>/<part>")
 @app.route("/puppet/v3/file_<api>/acmedata/<certname>/<part>")
 def get_certs(certname=None, part=None, api=None):
@@ -278,9 +309,12 @@ def get_certs(certname=None, part=None, api=None):
     Passes through to CertCentral.get_certs, as app.route can't handle the self
     parameter.
     """
-    return cert_manager.get_certs(certname, part, api)
+    return app.cert_manager.get_certs(certname, part, api)
 
 
 if __name__ == '__main__':
-    cert_manager.run()
+    # This allows us to import the module without instantiating CertCentral
+    # also get_certs() should/could be outside the CertCentral class
+    app.cert_manager = CertCentral()
+    app.cert_manager.run()
     app.run()

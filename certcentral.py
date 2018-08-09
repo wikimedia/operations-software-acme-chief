@@ -20,16 +20,13 @@ A description of it can be found at https://phabricator.wikimedia.org/T194962
 """
 import collections
 import datetime
-import hashlib
 import os
 import signal
 import tempfile
-import threading
 import time
 import traceback
 
 from cryptography.hazmat.primitives.asymmetric import ec
-import flask
 import yaml
 
 import acme_tiny
@@ -40,8 +37,6 @@ from x509 import (
     RSAPrivateKey,
     SelfSignedCertificate,
 )
-
-app = flask.Flask(__name__)  # pylint: disable=invalid-name
 
 BASEPATH = '/etc/certcentral'
 KEY_TYPES = {
@@ -127,16 +122,13 @@ class CertCentral():
 
     def run(self):
         """
-        Starts up the certificate management and HTTP listener threads.
+        Starts up the certificate management
         """
         acct_key = RSAPrivateKey()
         acct_key.generate()
         acct_key.save(self.account_key_path)   # TODO: Do we really need to generate this key on every start-up?
         self.create_initial_certs()
-        threading.Thread(
-            target=self.certificate_management,
-            name="Issue and renew certificates"
-        ).start()
+        self.certificate_management()
 
     def sighup_handler(self, *_):
         """
@@ -232,89 +224,6 @@ class CertCentral():
                     temp_private_key.close()
                 time.sleep(5)
 
-    def get_certs(self, certname=None, part=None, api=None):  # pylint: disable=too-many-return-statements
-        """
-        This is the function that gets called whenever a server asks us for a certificate.
-        It implements two different APIs - our own simple /certs/ as well as the Puppet fileserver
-        API.
-        For Puppet, it can also produce metadata about the file, including the path on our system,
-        owner, group, mode, and an MD5 hash of the file contents.
-        This function is responsible for checking the X_CLIENT_DN header given by Nginx corresponds
-        to a hostname that has been authorized for access to the certificate it is requesting.
-        """
-        if api is not None and api not in ['metadata', 'content']:
-            return 'invalid puppet API call', 400
-
-        valid_parts = []
-        for key_type_id in KEY_TYPES:
-            valid_parts.append('{}.public.pem'.format(key_type_id))
-            valid_parts.append('{}.private.pem'.format(key_type_id))
-
-        if part not in valid_parts:
-            return 'part must be in {}'.format(valid_parts), 400
-
-        client_dn = flask.request.headers['X_CLIENT_DN']
-        if client_dn.startswith('CN='):
-            client_dn = client_dn[3:]
-        else:
-            return 'your client DN looks funny', 400
-
-        print('Client {} identified as {} requested {} part {}'.format(
-            flask.request.remote_addr,
-            client_dn,
-            certname,
-            part
-        ))
-
-        if certname not in self.config.certificates:
-            return 'no such certname', 404
-
-        if client_dn not in self.config.authorized_hosts[certname]:
-            return 'gtfo', 403
-
-        fname = '{}.{}'.format(certname, part)
-        fpath = os.path.join(self.live_certs_path, fname)
-        with open(fpath, 'rb') as requested_f:
-            file_contents = requested_f.read()
-
-        assert flask.request.args.get('environment') in ['production', None]
-        if api == 'metadata':
-            assert flask.request.args.get('checksum_type') == 'md5'
-            assert flask.request.args.get('links') == 'manage'
-            assert flask.request.args.get('source_permissions') == 'ignore'
-            stat_ret = os.stat(fpath)
-            metadata = {
-                'path': fpath,
-                'relative_path': None,
-                'links': 'manage',
-                'owner': stat_ret.st_uid,
-                'group': stat_ret.st_gid,
-                'mode': stat_ret.st_mode & 0o777,  # ignore S_IFREG
-                'type': 'file',
-                'destination': None,
-                'checksum': {
-                    'type': 'md5',
-                    'value': '{md5}' + hashlib.md5(file_contents).hexdigest()
-                }
-            }
-            return flask.Response(yaml.dump(metadata), mimetype='text/yaml')
-        else:
-            return file_contents
-
-
-@app.route("/certs/<certname>/<part>")
-@app.route("/puppet/v3/file_<api>/acmedata/<certname>/<part>")
-def get_certs(certname=None, part=None, api=None):
-    """
-    Passes through to CertCentral.get_certs, as app.route can't handle the self
-    parameter.
-    """
-    return app.cert_manager.get_certs(certname, part, api)
-
 
 if __name__ == '__main__':
-    # This allows us to import the module without instantiating CertCentral
-    # also get_certs() should/could be outside the CertCentral class
-    app.cert_manager = CertCentral()
-    app.cert_manager.run()
-    app.run()
+    CertCentral().run()

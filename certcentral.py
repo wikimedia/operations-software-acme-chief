@@ -26,17 +26,12 @@ import tempfile
 import time
 import traceback
 
-from cryptography.hazmat.primitives.asymmetric import ec
 import yaml
+from cryptography.hazmat.primitives.asymmetric import ec
 
-import acme_tiny
-
-from x509 import (
-    CertificateSigningRequest,
-    ECPrivateKey,
-    RSAPrivateKey,
-    SelfSignedCertificate,
-)
+from acme_requests import ACMEAccount, ACMEChallengeType, ACMERequests
+from x509 import (CertificateSigningRequest, ECPrivateKey, RSAPrivateKey,
+                  SelfSignedCertificate)
 
 BASEPATH = '/etc/certcentral'
 KEY_TYPES = {
@@ -124,9 +119,6 @@ class CertCentral():
         """
         Starts up the certificate management
         """
-        acct_key = RSAPrivateKey()
-        acct_key.generate()
-        acct_key.save(self.account_key_path)   # TODO: Do we really need to generate this key on every start-up?
         self.create_initial_certs()
         self.certificate_management()
 
@@ -197,26 +189,30 @@ class CertCentral():
                     try:
                         # TODO: make this check for /.well-known/acme-challenge file on % of
                         # authorized hosts
-                        signed_cert = acme_tiny.get_crt(
-                            self.account_key_path,
-                            csr_fullpath,
-                            self.http_challenges_path,
-                            CA='https://acme-staging.api.letsencrypt.org'
-                        )
+                        acme_account_id = cert_details.get('account', self.config.default_account)
+                        account = ACMEAccount.load(acme_account_id)
+                        session = ACMERequests(account)
+                        challenges = session.push_csr(csr)
+                        for challenge in challenges[ACMEChallengeType.HTTP01]:
+                            challenge.save(os.path.join(self.http_challenges_path, challenge.file_name))
+
+                        session.push_solved_challenges(csr.csr_id, challenge_type=ACMEChallengeType.HTTP01)
+                        signed_cert = session.get_certificate(csr.csr_id)
+                        if signed_cert is None:     # we were too fast and the ACME directory wasn't able to validate
+                                                    # the challenges yet
+                            continue
 
                         public_cert_path = os.path.join(
                             self.live_certs_path,
                             '{}.{}.public.pem'.format(cert_id, key_type_id)
                         )
-                        with open(public_cert_path, 'w+b') as public_cert_f:
-                            public_cert_f.write(signed_cert.encode('utf-8'))
+                        signed_cert.save(public_cert_path)
 
                         private_key_path = os.path.join(
                             self.live_certs_path,
                             '{}.{}.private.pem'.format(cert_id, key_type_id)
                         )
-                        with open(private_key_path, 'w+b') as private_key_f:
-                            private_key_f.write(temp_private_key.read())
+                        private_key.save(private_key_path)
 
                         have_certs.update([(cert_id, key_type_id)])
                     except Exception:  # pylint: disable=broad-except

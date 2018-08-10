@@ -60,6 +60,12 @@ class HTTP01ACMEChallenge(BaseACMEChallenge):
         super().__init__(ACMEChallengeType.HTTP01, validation)
         self.hostname = hostname
         self.path = path
+        self.file_name = path.split('/')[-1]
+
+    def save(self, file_name):
+        """Persists the challenge on disk"""
+        with open(file_name, 'w') as challenge_file:
+            challenge_file.write(self.validation)
 
 
 class ACMEAccount:

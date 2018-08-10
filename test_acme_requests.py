@@ -8,11 +8,12 @@ import time
 import unittest
 from datetime import datetime, timedelta
 
+import mock
 from cryptography import x509 as crypto_x509
 from cryptography.x509.oid import ExtensionOID, NameOID
 
 from acme_requests import (ACMEAccount, ACMEAccountFiles, ACMEChallengeType,
-                           ACMERequests)
+                           ACMERequests, HTTP01ACMEChallenge)
 from x509 import (CertificateSigningRequest, ECPrivateKey, RSAPrivateKey,
                   SelfSignedCertificate)
 
@@ -58,6 +59,20 @@ class ACMEAccountTest(unittest.TestCase):
         self.assertIsInstance(account.key, RSAPrivateKey)
         self.assertIsNone(account.regr)
         self.assertEqual(account.account_id, hashlib.md5(account.key.public_pem).hexdigest())
+
+
+class ACMEChallengeTest(unittest.TestCase):
+    def test_save_http(self):
+        challenge = HTTP01ACMEChallenge(hostname='tests.wmflabs.org',
+                                        path='/.well-known/acme-challenge/BMHfMfFy0DtWYRwjxMFFSkmYZS5azT58-4YDrWfW_l4',
+                                        validation='BMHfMfFy0DtWYRwjxMFFSkmYZS5azT58-4YDrWfW_l4.xnhzweFE-KO1EIuyHhY7iFw7ROdIN_uPCXG2tYK-Sv8')
+        with tempfile.TemporaryDirectory() as temp_dir:
+            challenge_path = os.path.join(temp_dir, challenge.file_name)
+            challenge.save(os.path.join(challenge_path))
+
+            with open(challenge_path, 'r') as challenge_file:
+                validation = challenge_file.read()
+                self.assertEqual(validation, challenge.validation)
 
 
 class ACMEIntegrationTests(unittest.TestCase):
@@ -130,7 +145,7 @@ class ACMEIntegrationTests(unittest.TestCase):
 
     def test_account_persistence(self):
         with tempfile.TemporaryDirectory() as base_path:
-            with unittest.mock.patch('acme_requests.TLS_VERIFY', False):
+            with mock.patch('acme_requests.TLS_VERIFY', False):
                 account = ACMEAccount.create('test-persistence@wikimedia.org',
                                              base_path=base_path,
                                              directory_url=DIRECTORY_URL)
@@ -141,14 +156,14 @@ class ACMEIntegrationTests(unittest.TestCase):
                 file_path = os.path.join(base_path, account_id, account_file.value)
                 self.assertTrue(os.path.isfile(file_path))
 
-            with unittest.mock.patch('acme_requests.TLS_VERIFY', False):
+            with mock.patch('acme_requests.TLS_VERIFY', False):
                 load_account = ACMEAccount.load(account_id, base_path=base_path, directory_url=DIRECTORY_URL)
                 self.assertIsInstance(load_account, ACMEAccount)
                 self.assertIsInstance(ACMERequests(load_account), ACMERequests)
 
     def test_full_workflow_dns_challenge(self):
         """Expects pebble to be invoked with PEBBLE_VA_ALWAYS_VALID=1"""
-        with unittest.mock.patch('acme_requests.TLS_VERIFY', False):
+        with mock.patch('acme_requests.TLS_VERIFY', False):
             account = ACMEAccount.create('tests-dns@wikimedia.org', directory_url=DIRECTORY_URL)
             session = ACMERequests(account)
         self.assertIsNotNone(account.regr)
@@ -188,7 +203,7 @@ class ACMEIntegrationTests(unittest.TestCase):
 
     def test_full_workflow_http_challenge(self):
         """Expects pebble to be invoked with PEBBLE_VA_ALWAYS_VALID=1"""
-        with unittest.mock.patch('acme_requests.TLS_VERIFY', False):
+        with mock.patch('acme_requests.TLS_VERIFY', False):
             account = ACMEAccount.create('tests-http@wikimedia.org', directory_url=DIRECTORY_URL)
             session = ACMERequests(account)
         self.assertIsNotNone(account.regr)
@@ -221,7 +236,7 @@ class ACMEIntegrationTests(unittest.TestCase):
 
     def test_full_workflow_ec_certificate(self):
         """Expects pebble to be invoked with PEBBLE_VA_ALWAYS_VALID=1"""
-        with unittest.mock.patch('acme_requests.TLS_VERIFY', False):
+        with mock.patch('acme_requests.TLS_VERIFY', False):
             account = ACMEAccount.create('tests-ec@wikimedia.org', directory_url=DIRECTORY_URL)
             session = ACMERequests(account)
         self.assertIsNotNone(account.regr)

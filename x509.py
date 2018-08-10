@@ -67,7 +67,7 @@ class PrivateKeyLoader(object):
         """
         key_stat = os.stat(filename)
         if key_stat.st_mode & (stat.S_IRWXG | stat.S_IRWXO):
-            raise Exception("permissions ({:o}) are too open for {}".format(stat.S_IMODE(key_stat.st_mode), filename))
+            raise X509Error("permissions ({:o}) are too open for {}".format(stat.S_IMODE(key_stat.st_mode), filename))
 
         with open(filename, 'rb') as key_file:
             private_key = serialization.load_pem_private_key(
@@ -211,7 +211,7 @@ class CertificateSigningRequest(BaseX509Builder):
     def __init__(self, private_key, common_name, sans):
         super().__init__(crypto_x509.CertificateSigningRequestBuilder(), private_key, common_name, sans)
         self.wildcard = self._find_wildcard()
-        self.csr_id = hashlib.md5(self.pem).hexdigest()
+        self.csr_id = CertificateSigningRequest.generate_csr_id(private_key.public_pem, common_name, sans)
 
     @property
     def request(self):
@@ -230,6 +230,21 @@ class CertificateSigningRequest(BaseX509Builder):
             if dns_name.startswith('*.'):
                 return True
         return False
+
+    @staticmethod
+    def generate_csr_id(public_key_pem, common_name, sans):
+        """Generates the CSR id built with the following parameters:
+            - PEM of the public key used to sign the CSR
+            - common name in the CSR
+            - SANS in the CSR
+        """
+        csr_id = hashlib.md5()
+        csr_id.update(public_key_pem)
+        csr_id.update(common_name.lower().encode('utf-8'))
+        for san in sans:
+            csr_id.update(str(san).lower().encode('utf-8'))
+
+        return csr_id.hexdigest()
 
 
 class SelfSignedCertificate(BaseX509Builder):

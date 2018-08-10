@@ -28,6 +28,10 @@ class ACMEError(Exception):
     """Base error class"""
 
 
+class ACMEOrderNotFound(ACMEError):
+    """Order not found in the current ACME session"""
+
+
 class ACMEAccountFiles(Enum):
     """Files needed to persist an account"""
     KEY = 'private_key.pem'
@@ -196,7 +200,7 @@ class ACMERequests:
         try:
             return self.orders[csr_id]
         except KeyError:
-            raise ACMEError('csr_id {} not found'.format(csr_id))
+            raise ACMEOrderNotFound('csr_id {} not found'.format(csr_id))
 
     def push_csr(self, csr):
         """

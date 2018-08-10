@@ -14,7 +14,7 @@ from cryptography.x509.oid import ExtensionOID, NameOID
 from x509 import (DEFAULT_EC_CURVE, DEFAULT_RSA_KEY_SIZE, OPENER_MODE,
                   Certificate, CertificateSigningRequest, ECPrivateKey,
                   PrivateKey, PrivateKeyLoader, RSAPrivateKey,
-                  SelfSignedCertificate, secure_opener)
+                  SelfSignedCertificate, X509Error, secure_opener)
 
 RSA_TEST_KEY = '''
 -----BEGIN RSA PRIVATE KEY-----
@@ -131,7 +131,7 @@ class PrivateKeyTest(unittest.TestCase):
             with open(filename, "w", opener=unsecure_opener) as f:
                 f.write(RSA_TEST_KEY)
 
-            with self.assertRaises(Exception):
+            with self.assertRaises(X509Error):
                 PrivateKeyLoader.load(filename)
 
 
@@ -139,14 +139,15 @@ class CertificateSigningRequestTest(unittest.TestCase):
     def test_CSR_generation(self):
         pk = RSAPrivateKey()
         pk.generate()
-        csr = CertificateSigningRequest(
-            private_key=pk,
-            common_name="certcentral.test",
-            sans=(
+        csr_sans = (
                 '*.certcentral.test',
                 ipaddress.IPv4Address('127.0.0.1'),
                 ipaddress.IPv6Address('::1'),
-            ),
+        )
+        csr = CertificateSigningRequest(
+            private_key=pk,
+            common_name="certcentral.test",
+            sans=csr_sans,
         )
 
         self.assertIsInstance(csr.request, crypto_x509.CertificateSigningRequest)
@@ -161,6 +162,9 @@ class CertificateSigningRequestTest(unittest.TestCase):
             sans.value.get_values_for_type(crypto_x509.IPAddress),
             [ipaddress.IPv4Address('127.0.0.1'), ipaddress.IPv6Address('::1')]
         )
+        self.assertEqual(csr.csr_id, CertificateSigningRequest.generate_csr_id(pk.public_pem,
+                                                                               'certcentral.test',
+                                                                               csr_sans))
         self.assertTrue(csr.wildcard)
 
     def test_csr_without_sans(self):
@@ -211,4 +215,3 @@ class CertificateTest(unittest.TestCase):
         with mock.patch('x509.datetime') as mocked_datetime:
             mocked_datetime.utcnow = mock.Mock(return_value=mocked_now)
             self.assertTrue(cert.needs_renew())
-

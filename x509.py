@@ -32,6 +32,16 @@ class X509Error(Exception):
     """Base exception class for the X509 module"""
 
 
+class CertificateSaveMode(Enum):
+    """
+    Certificate save modes.
+    To be used in Certificate.save()
+    """
+    CERT_ONLY = 1
+    CHAIN_ONLY = 2
+    FULL_CHAIN = 3  # certificate + chain
+
+
 class CertificateRevokeReason(Enum):
     """
     Certificate revoke reason codes as defined in
@@ -305,13 +315,18 @@ class Certificate:
         """Returns True if the certificate is self signed, False otherwise"""
         return self.certificate.issuer == self.certificate.subject
 
-    def save(self, path, full_chain=False):
+    def save(self, path, mode=CertificateSaveMode.CERT_ONLY):
         """Persists the certificate on disk serializad as a PEM"""
+        if mode is CertificateSaveMode.CERT_ONLY:
+            save_chain = self.chain[0:1]
+        elif mode is CertificateSaveMode.CHAIN_ONLY:
+            save_chain = self.chain[1:]
+        else:
+            save_chain = self.chain
+
         with open(path, 'wb') as pem_file:
-            for cert in self.chain:
+            for cert in save_chain:
                 pem_file.write(cert.pem)
-                if not full_chain:
-                    break
 
     def needs_renew(self, renewal_period=DEFAULT_RENEWAL_PERIOD):
         """Returns True if the certificate needs to be renewed"""

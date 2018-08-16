@@ -12,8 +12,8 @@ from cryptography.hazmat.primitives.asymmetric import ec, rsa
 from cryptography.x509.oid import ExtensionOID, NameOID
 
 from x509 import (DEFAULT_EC_CURVE, DEFAULT_RSA_KEY_SIZE, OPENER_MODE,
-                  Certificate, CertificateSigningRequest, ECPrivateKey,
-                  PrivateKey, PrivateKeyLoader, RSAPrivateKey,
+                  Certificate, CertificateSaveMode, CertificateSigningRequest,
+                  ECPrivateKey, PrivateKey, PrivateKeyLoader, RSAPrivateKey,
                   SelfSignedCertificate, X509Error, secure_opener)
 
 RSA_TEST_KEY = '''
@@ -53,6 +53,87 @@ AwEHoUQDQgAEe635B78GCi84ub06L1Ow9OXKaIc63k4SRzFSGyJ1AXg6VxQBeeXt
 r7o8yXlWBLv89THLlzqSKCC/bw1DpngsGg==
 -----END EC PRIVATE KEY-----
 '''
+
+FULL_CHAIN = b'''
+-----BEGIN CERTIFICATE-----
+MIIIfDCCB2SgAwIBAgIQCDCUYtH+pgrgur/174vFRTANBgkqhkiG9w0BAQsFADBw
+MQswCQYDVQQGEwJVUzEVMBMGA1UEChMMRGlnaUNlcnQgSW5jMRkwFwYDVQQLExB3
+d3cuZGlnaWNlcnQuY29tMS8wLQYDVQQDEyZEaWdpQ2VydCBTSEEyIEhpZ2ggQXNz
+dXJhbmNlIFNlcnZlciBDQTAeFw0xNzEyMjEwMDAwMDBaFw0xOTAxMjQxMjAwMDBa
+MHkxCzAJBgNVBAYTAlVTMRMwEQYDVQQIEwpDYWxpZm9ybmlhMRYwFAYDVQQHEw1T
+YW4gRnJhbmNpc2NvMSMwIQYDVQQKExpXaWtpbWVkaWEgRm91bmRhdGlvbiwgSW5j
+LjEYMBYGA1UEAwwPKi53aWtpcGVkaWEub3JnMFkwEwYHKoZIzj0CAQYIKoZIzj0D
+AQcDQgAE/cBrHlZz40YZjqpIs3sTvwssebIFnhxwfJe3cm2ki4Ij0jLeUCMcPbpt
+K3F49QKLsIQN4TZVOuTlBK1uem6H36OCBdIwggXOMB8GA1UdIwQYMBaAFFFo/5Cv
+Agd1PMzZZWRiohK4WXI7MB0GA1UdDgQWBBRurRGx7mcc61Td8ipmVMG+0DsoOTCC
+AvgGA1UdEQSCAu8wggLrgg8qLndpa2lwZWRpYS5vcmeCDXdpa2lwZWRpYS5vcmeC
+ESoubS53aWtpcGVkaWEub3JnghQqLnplcm8ud2lraXBlZGlhLm9yZ4INd2lraW1l
+ZGlhLm9yZ4IPKi53aWtpbWVkaWEub3JnghEqLm0ud2lraW1lZGlhLm9yZ4IWKi5w
+bGFuZXQud2lraW1lZGlhLm9yZ4INbWVkaWF3aWtpLm9yZ4IPKi5tZWRpYXdpa2ku
+b3JnghEqLm0ubWVkaWF3aWtpLm9yZ4INd2lraWJvb2tzLm9yZ4IPKi53aWtpYm9v
+a3Mub3JnghEqLm0ud2lraWJvb2tzLm9yZ4IMd2lraWRhdGEub3Jngg4qLndpa2lk
+YXRhLm9yZ4IQKi5tLndpa2lkYXRhLm9yZ4IMd2lraW5ld3Mub3Jngg4qLndpa2lu
+ZXdzLm9yZ4IQKi5tLndpa2luZXdzLm9yZ4INd2lraXF1b3RlLm9yZ4IPKi53aWtp
+cXVvdGUub3JnghEqLm0ud2lraXF1b3RlLm9yZ4IOd2lraXNvdXJjZS5vcmeCECou
+d2lraXNvdXJjZS5vcmeCEioubS53aWtpc291cmNlLm9yZ4IPd2lraXZlcnNpdHku
+b3JnghEqLndpa2l2ZXJzaXR5Lm9yZ4ITKi5tLndpa2l2ZXJzaXR5Lm9yZ4IOd2lr
+aXZveWFnZS5vcmeCECoud2lraXZveWFnZS5vcmeCEioubS53aWtpdm95YWdlLm9y
+Z4IOd2lrdGlvbmFyeS5vcmeCECoud2lrdGlvbmFyeS5vcmeCEioubS53aWt0aW9u
+YXJ5Lm9yZ4IXd2lraW1lZGlhZm91bmRhdGlvbi5vcmeCGSoud2lraW1lZGlhZm91
+bmRhdGlvbi5vcmeCGyoubS53aWtpbWVkaWFmb3VuZGF0aW9uLm9yZ4ISd21mdXNl
+cmNvbnRlbnQub3JnghQqLndtZnVzZXJjb250ZW50Lm9yZ4IGdy53aWtpMA4GA1Ud
+DwEB/wQEAwIHgDAdBgNVHSUEFjAUBggrBgEFBQcDAQYIKwYBBQUHAwIwdQYDVR0f
+BG4wbDA0oDKgMIYuaHR0cDovL2NybDMuZGlnaWNlcnQuY29tL3NoYTItaGEtc2Vy
+dmVyLWc2LmNybDA0oDKgMIYuaHR0cDovL2NybDQuZGlnaWNlcnQuY29tL3NoYTIt
+aGEtc2VydmVyLWc2LmNybDBMBgNVHSAERTBDMDcGCWCGSAGG/WwBATAqMCgGCCsG
+AQUFBwIBFhxodHRwczovL3d3dy5kaWdpY2VydC5jb20vQ1BTMAgGBmeBDAECAjCB
+gwYIKwYBBQUHAQEEdzB1MCQGCCsGAQUFBzABhhhodHRwOi8vb2NzcC5kaWdpY2Vy
+dC5jb20wTQYIKwYBBQUHMAKGQWh0dHA6Ly9jYWNlcnRzLmRpZ2ljZXJ0LmNvbS9E
+aWdpQ2VydFNIQTJIaWdoQXNzdXJhbmNlU2VydmVyQ0EuY3J0MAwGA1UdEwEB/wQC
+MAAwggEGBgorBgEEAdZ5AgQCBIH3BIH0APIAdwC72d+8H4pxtZOUI5eqkntHOFeV
+CqtS6BqQlmQ2jh7RhQAAAWB6Rb/PAAAEAwBIMEYCIQCYBInG8WHe18O9vaEPnHxH
+LYRqOcc7wiG6SCybdpzCTQIhAIgDyjxagryxHN2Y4vraBjPd/OsIi5KWNmf7uXph
+IQ6gAHcAh3W/51l8+IxDmV+9827/Vo1HVjb/SrVgwbTq/16ggw8AAAFgekXAKAAA
+BAMASDBGAiEAxInIUUoY+UKfTiQfcQt0Bq+RV/oKF6Qvivhful45z3wCIQCUgFZz
+FpBXRl1puoXQ8S379GmZm6h8pDEPnrFymBix1DANBgkqhkiG9w0BAQsFAAOCAQEA
+Cn7jA1gpa8XvPlZoaYjHBLdcBEAJDKS4at1GHvaXrEGN6wc4tURSlC8J02SV9t9I
+QmQ/yVwk4OYzGBqWAqCDNkvCEblead7ENhWEUdGqVzlJT2Pjp2KUtHHLTITmEY2l
+GGY7amjEJcyJpxaEbZW8OBoiXajz7DlIl+Inh0mYtAtQl3QK6dnBPRyKBItRvfSy
+AjL+a6v0Ad4OHuTjbYpXKRHgKu9ewVxjP2NE668rLy2bCXCdw1H3KX7NtsPHlLW4
+QOtJM8xSDR4B5/V51y6yxilSHgv9rNouLc+7JChE+5aS74OlqwyMIqHg7Tuhbxt9
+w6L7TYVnAT0Usyda5d06Ew==
+-----END CERTIFICATE-----
+-----BEGIN CERTIFICATE-----
+MIIEsTCCA5mgAwIBAgIQBOHnpNxc8vNtwCtCuF0VnzANBgkqhkiG9w0BAQsFADBs
+MQswCQYDVQQGEwJVUzEVMBMGA1UEChMMRGlnaUNlcnQgSW5jMRkwFwYDVQQLExB3
+d3cuZGlnaWNlcnQuY29tMSswKQYDVQQDEyJEaWdpQ2VydCBIaWdoIEFzc3VyYW5j
+ZSBFViBSb290IENBMB4XDTEzMTAyMjEyMDAwMFoXDTI4MTAyMjEyMDAwMFowcDEL
+MAkGA1UEBhMCVVMxFTATBgNVBAoTDERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3
+LmRpZ2ljZXJ0LmNvbTEvMC0GA1UEAxMmRGlnaUNlcnQgU0hBMiBIaWdoIEFzc3Vy
+YW5jZSBTZXJ2ZXIgQ0EwggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQC2
+4C/CJAbIbQRf1+8KZAayfSImZRauQkCbztyfn3YHPsMwVYcZuU+UDlqUH1VWtMIC
+Kq/QmO4LQNfE0DtyyBSe75CxEamu0si4QzrZCwvV1ZX1QK/IHe1NnF9Xt4ZQaJn1
+itrSxwUfqJfJ3KSxgoQtxq2lnMcZgqaFD15EWCo3j/018QsIJzJa9buLnqS9UdAn
+4t07QjOjBSjEuyjMmqwrIw14xnvmXnG3Sj4I+4G3FhahnSMSTeXXkgisdaScus0X
+sh5ENWV/UyU50RwKmmMbGZJ0aAo3wsJSSMs5WqK24V3B3aAguCGikyZvFEohQcft
+bZvySC/zA/WiaJJTL17jAgMBAAGjggFJMIIBRTASBgNVHRMBAf8ECDAGAQH/AgEA
+MA4GA1UdDwEB/wQEAwIBhjAdBgNVHSUEFjAUBggrBgEFBQcDAQYIKwYBBQUHAwIw
+NAYIKwYBBQUHAQEEKDAmMCQGCCsGAQUFBzABhhhodHRwOi8vb2NzcC5kaWdpY2Vy
+dC5jb20wSwYDVR0fBEQwQjBAoD6gPIY6aHR0cDovL2NybDQuZGlnaWNlcnQuY29t
+L0RpZ2lDZXJ0SGlnaEFzc3VyYW5jZUVWUm9vdENBLmNybDA9BgNVHSAENjA0MDIG
+BFUdIAAwKjAoBggrBgEFBQcCARYcaHR0cHM6Ly93d3cuZGlnaWNlcnQuY29tL0NQ
+UzAdBgNVHQ4EFgQUUWj/kK8CB3U8zNllZGKiErhZcjswHwYDVR0jBBgwFoAUsT7D
+aQP4v0cB1JgmGggC72NkK8MwDQYJKoZIhvcNAQELBQADggEBABiKlYkD5m3fXPwd
+aOpKj4PWUS+Na0QWnqxj9dJubISZi6qBcYRb7TROsLd5kinMLYBq8I4g4Xmk/gNH
+E+r1hspZcX30BJZr01lYPf7TMSVcGDiEo+afgv2MW5gxTs14nhr9hctJqvIni5ly
+/D6q1UEL2tU2ob8cbkdJf17ZSHwD2f2LSaCYJkJA69aSEaRkCldUxPUd1gJea6zu
+xICaEnL6VpPX/78whQYwvwt/Tv9XBZ0k7YXDK/umdaisLRbvfXknsuvCnQsH6qqF
+0wGjIChBWUMo0oHjqvbsezt3tkBigAVBRQHvFwY+3sAzm2fTYS5yh+Rp/BIAV0Ae
+cPUeybQ=
+-----END CERTIFICATE-----
+'''
+FIRST_CERT_SERIAL_NUMBER = 0x8309462d1fea60ae0babff5ef8bc545
+SECOND_CERT_SERIAL_NUMBER = 0x4e1e7a4dc5cf2f36dc02b42b85d159f
 
 def get_self_signed_certificate(from_date, until_date):
     pk = RSAPrivateKey()
@@ -215,3 +296,30 @@ class CertificateTest(unittest.TestCase):
         with mock.patch('x509.datetime') as mocked_datetime:
             mocked_datetime.utcnow = mock.Mock(return_value=mocked_now)
             self.assertTrue(cert.needs_renew())
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            full_chain_cert = Certificate(FULL_CHAIN)
+            # sanity check
+            self.assertEqual(len(full_chain_cert.chain), 2)
+            self.assertEqual(full_chain_cert.chain[0].certificate.serial_number, FIRST_CERT_SERIAL_NUMBER)
+            self.assertEqual(full_chain_cert.chain[1].certificate.serial_number, SECOND_CERT_SERIAL_NUMBER)
+
+            cert_only_path = os.path.join(temp_dir, 'cert.crt')
+            chain_only_path = os.path.join(temp_dir, 'chain.crt')
+            full_chain_path = os.path.join(temp_dir, 'chained.crt')
+            full_chain_cert.save(cert_only_path, mode=CertificateSaveMode.CERT_ONLY)
+            full_chain_cert.save(chain_only_path, mode=CertificateSaveMode.CHAIN_ONLY)
+            full_chain_cert.save(full_chain_path, mode=CertificateSaveMode.FULL_CHAIN)
+
+            cert_only = Certificate.load(cert_only_path)
+            self.assertEqual(len(cert_only.chain), 1)
+            self.assertEqual(cert_only.certificate.serial_number, FIRST_CERT_SERIAL_NUMBER)
+
+            chain_only = Certificate.load(chain_only_path)
+            self.assertEqual(len(chain_only.chain), 1)
+            self.assertEqual(chain_only.certificate.serial_number, SECOND_CERT_SERIAL_NUMBER)
+
+            full_chain = Certificate.load(full_chain_path)
+            self.assertEqual(len(full_chain.chain), 2)
+            self.assertEqual(full_chain.chain[0].certificate.serial_number, FIRST_CERT_SERIAL_NUMBER)
+            self.assertEqual(full_chain.chain[1].certificate.serial_number, SECOND_CERT_SERIAL_NUMBER)

@@ -32,6 +32,10 @@ class ACMEOrderNotFound(ACMEError):
     """Order not found in the current ACME session"""
 
 
+class ACMEInvalidChallengeError(ACMEError):
+    """Challenge(s) have been marked as INVALID"""
+
+
 class ACMEAccountFiles(Enum):
     """Files needed to persist an account"""
     KEY = 'private_key.pem'
@@ -260,6 +264,8 @@ class ACMERequests:
         except errors.TimeoutError:
             # TimeoutError is raised if the challenges have not been validated yet
             return
+        except errors.ValidationError:
+            raise ACMEInvalidChallengeError('Unable to get certificate')
         except errors.Error as finalize_error:
             raise ACMEError('Unable to get certificate') from finalize_error
 

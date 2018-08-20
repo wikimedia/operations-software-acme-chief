@@ -1,5 +1,6 @@
 # Central certificates service
 # Alex Monk <krenair@gmail.com>, May/June 2018
+# Valentin Gutierrez <vgutierrez@wikimedia.org> Wikimedia Foundation. 2018
 
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -22,14 +23,15 @@ import collections
 import datetime
 import os
 import signal
-import time
 from enum import Enum
+from time import sleep
 
 import yaml
 from cryptography.hazmat.primitives.asymmetric import ec
 
 from acme_requests import (ACMEAccount, ACMEChallengeType, ACMEError,
-                           ACMEOrderNotFound, ACMERequests)
+                           ACMEInvalidChallengeError, ACMEOrderNotFound,
+                           ACMERequests)
 from x509 import (Certificate, CertificateSigningRequest, ECPrivateKey,
                   PrivateKeyLoader, RSAPrivateKey, SelfSignedCertificate,
                   X509Error)
@@ -110,7 +112,8 @@ class CertCentral():
     data.
     """
     live_certs_path = 'live_certs'
-    account_key_path = 'acct.key'
+    new_certs_path = 'new_certs'
+    accounts_path = 'accounts'
     csrs_path = 'csrs'
     config_path = 'config.yaml'
     confd_path = 'conf.d'
@@ -118,7 +121,8 @@ class CertCentral():
 
     def __init__(self, base_path=BASEPATH):
         self.live_certs_path = os.path.join(base_path, CertCentral.live_certs_path)
-        self.account_key_path = os.path.join(base_path, CertCentral.account_key_path)
+        self.new_certs_path = os.path.join(base_path, CertCentral.new_certs_path)
+        self.accounts_path = os.path.join(base_path, CertCentral.accounts_path)
         self.csrs_path = os.path.join(base_path, CertCentral.csrs_path)
         self.config_path = os.path.join(base_path, CertCentral.config_path)
         self.confd_path = os.path.join(base_path, CertCentral.confd_path)
@@ -129,14 +133,19 @@ class CertCentral():
         signal.signal(signal.SIGHUP, self.sighup_handler)
         self.sighup_handler()
 
-    def _get_live_path(self, cert_id, key_type_id, public=True):
+    def _get_path(self, cert_id, key_type_id, public=True, kind='live'):
         if public:
             part = 'public'
         else:
             part = 'private'
 
+        if kind == 'live':
+            base = self.live_certs_path
+        else:
+            base = self.new_certs_path
+
         file_name = '{}.{}.{}.pem'.format(cert_id, key_type_id, part)
-        return os.path.join(self.live_certs_path, file_name)
+        return os.path.join(base, file_name)
 
     def _set_cert_status(self):
         """
@@ -168,7 +177,7 @@ class CertCentral():
                     pass
 
                 try:
-                    certificate = Certificate.load(self._get_live_path(cert_id, key_type_id, public=True))
+                    certificate = Certificate.load(self._get_path(cert_id, key_type_id, public=True, kind='live'))
                     status[cert_id][key_type_id] = _get_certificate_status(certificate)
                 except (OSError, X509Error):
                     status[cert_id][key_type_id] = CertificateStatus.INITIAL
@@ -205,7 +214,7 @@ class CertCentral():
 
                 key = key_type_details['class']()
                 key.generate(**key_type_details['params'])
-                key.save(self._get_live_path(cert_id, key_type_id, public=False))
+                key.save(self._get_path(cert_id, key_type_id, public=False, kind='live'))
 
                 cert = SelfSignedCertificate(
                     private_key=key,
@@ -214,7 +223,7 @@ class CertCentral():
                     from_date=datetime.datetime.utcnow(),
                     until_date=datetime.datetime.utcnow() + datetime.timedelta(days=3),
                 )
-                cert.save(self._get_live_path(cert_id, key_type_id, public=True))
+                cert.save(self._get_path(cert_id, key_type_id, public=True, kind='live'))
                 self.cert_status[cert_id][key_type_id] = CertificateStatus.SELF_SIGNED
 
     def _get_acme_session(self, cert_details):
@@ -224,6 +233,7 @@ class CertCentral():
                 if account['id'] == acme_account_id:
                     directory_url = account['directory']
                     self.acme_sessions[acme_account_id] = ACMERequests(ACMEAccount.load(acme_account_id,
+                                                                                        base_path=self.accounts_path,
                                                                                         directory_url=directory_url))
         return self.acme_sessions[acme_account_id]
 
@@ -237,7 +247,7 @@ class CertCentral():
         key_type_details = KEY_TYPES[key_type_id]
         private_key = key_type_details['class']()
         private_key.generate(**key_type_details['params'])
-        private_key.save(self._get_live_path(cert_id, key_type_id, public=False))
+        private_key.save(self._get_path(cert_id, key_type_id, public=False, kind='new'))
 
         csr_filename = '{}.{}.csr.pem'.format(cert_id, key_type_id)
         csr_fullpath = os.path.join(self.csrs_path, csr_filename)
@@ -269,7 +279,7 @@ class CertCentral():
             - Passes the ball to the next status handler
         """
         try:
-            private_key = PrivateKeyLoader.load(self._get_live_path(cert_id, key_type_id, public=False))
+            private_key = PrivateKeyLoader.load(self._get_path(cert_id, key_type_id, public=False, kind='new'))
         except (OSError, X509Error):
             return CertificateStatus.SELF_SIGNED
 
@@ -300,7 +310,7 @@ class CertCentral():
             - Persists the certificate on disk
         """
         try:
-            private_key = PrivateKeyLoader.load(self._get_live_path(cert_id, key_type_id, public=False))
+            private_key = PrivateKeyLoader.load(self._get_path(cert_id, key_type_id, public=False, kind='new'))
         except (OSError, X509Error):
             return CertificateStatus.SELF_SIGNED
 
@@ -315,13 +325,27 @@ class CertCentral():
         session = self._get_acme_session(cert_details)
         try:
             certificate = session.get_certificate(csr_id)
-        except ACMEOrderNotFound:
+        except (ACMEOrderNotFound, ACMEInvalidChallengeError):
             return CertificateStatus.SELF_SIGNED
+        except ACMEError:
+            return CertificateStatus.CHALLENGES_PUSHED
 
         if certificate is None:
             return CertificateStatus.CHALLENGES_PUSHED
 
-        certificate.save(self._get_live_path(cert_id, key_type_id, public=True))
+        certificate.save(self._get_path(cert_id, key_type_id, public=True, kind='new'))
+        return self._push_live_certificate(cert_id, key_type_id)
+
+    def _push_live_certificate(self, cert_id, key_type_id):
+        """Moves a new certificate to the live path after checking that everything looks sane"""
+        try:
+            private_key = PrivateKeyLoader.load(self._get_path(cert_id, key_type_id, public=False, kind='new'))
+            cert = Certificate.load(self._get_path(cert_id, key_type_id, public=True, kind='new'))
+            private_key.save(self._get_path(cert_id, key_type_id, public=False, kind='live'))
+            cert.save(self._get_path(cert_id, key_type_id, public=True, kind='live'))
+        except (OSError, X509Error):
+            return CertificateStatus.SELF_SIGNED
+
         return CertificateStatus.VALID
 
     def certificate_management(self):
@@ -349,7 +373,7 @@ class CertCentral():
                         continue
 
                     self.cert_status[cert_id][key_type_id] = new_status
-            time.sleep(5)
+            sleep(5)
 
 
 if __name__ == '__main__':

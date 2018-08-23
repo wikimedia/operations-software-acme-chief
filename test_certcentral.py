@@ -1,4 +1,5 @@
 import os
+import subprocess
 import tempfile
 import unittest
 from copy import deepcopy
@@ -7,10 +8,13 @@ from datetime import datetime, timedelta
 import mock
 from cryptography.hazmat.primitives.asymmetric import ec
 
-from acme_requests import ACMEAccount, ACMEChallengeType, ACMEError
-from certcentral import (KEY_TYPES, CertCentral, CertCentralConfig,
+from acme_requests import (ACMEAccount, ACMEChallengeType, ACMEError,
+                           DNS01ACMEChallenge)
+from certcentral import (DNS_ZONE_UPDATE_CMD, DNS_ZONE_UPDATE_CMD_TIMEOUT,
+                         KEY_TYPES, CertCentral, CertCentralConfig,
                          CertificateStatus)
-from test_pebble import BasePebbleIntegrationTest, HTTP01ChallengeHandler
+from test_pebble import (BaseDNSRequestHandler, BasePebbleIntegrationTest,
+                         HTTP01ChallengeHandler)
 from x509 import (Certificate, CertificateSaveMode, ECPrivateKey,
                   PrivateKeyLoader, X509Error)
 
@@ -28,11 +32,13 @@ certificates:
     CN: certcentraltest.beta.wmflabs.org
     SNI:
         - certcentraltest.beta.wmflabs.org
+    challenge: http-01
   non_default_account_certificate:
     account: 621b49f9c6ccbbfbff9acb6e18f71205
     CN: 'test.wmflabs.org'
     SNI:
         - '*.test.wmflabs.org'
+    challenge: dns-01
 '''
 
 VALID_CONFIG_EXAMPLE_WITHOUT_DEFAULT_ACCOUNT = '''
@@ -46,11 +52,13 @@ certificates:
     CN: certcentraltest.beta.wmflabs.org
     SNI:
         - certcentraltest.beta.wmflabs.org
+    challenge: http-01
   non_default_account_certificate:
     account: 621b49f9c6ccbbfbff9acb6e18f71205
     CN: 'test.wmflabs.org'
     SNI:
         - '*.test.wmflabs.org'
+    challenge: dns-01
 '''
 
 CONFD_VALID_FILE_EXAMPLE = '''
@@ -129,6 +137,7 @@ class CertCentralTest(unittest.TestCase):
                 {
                     'CN': 'certcentraltest.beta.wmflabs.org',
                     'SNI': ['certcentraltest.beta.wmflabs.org'],
+                    'challenge': 'http-01',
                 },
             },
             default_account='1945e767ad72a532ebca519242a801bf',
@@ -184,6 +193,7 @@ class CertCentralTest(unittest.TestCase):
                 {
                     'CN': 'certcentraltest.beta.wmflabs.org',
                     'SNI': ['certcentraltest.beta.wmflabs.org'],
+                    'challenge': 'http-01',
                 },
             },
             default_account='1945e767ad72a532ebca519242a801bf',
@@ -232,6 +242,34 @@ class CertCentralTest(unittest.TestCase):
         pkey_load_calls = [mock.call(get_path_mock.return_value), mock.call().save(get_path_mock.return_value)]
         pkey_load_mock.assert_has_calls(pkey_load_calls)
 
+    @mock.patch('subprocess.check_call')
+    def test_update_dns_zone(self, check_call_mock):
+        challenges = [DNS01ACMEChallenge('_acme-challenge.wmflabs.test', 'fake-challenge1'),
+                      DNS01ACMEChallenge('_acme-challenge.wmflabs.test', 'fake-challenge2')]
+        ret_value = self.instance._trigger_dns_zone_update(challenges)
+        self.assertTrue(ret_value)
+        params = []
+        for challenge in challenges:
+            params.append(challenge.validation_domain_name)
+            params.append(challenge.validation)
+
+        check_call_mock.assert_called_once_with([DNS_ZONE_UPDATE_CMD] + params,
+                                                stderr=subprocess.DEVNULL,
+                                                stdout=subprocess.DEVNULL,
+                                                timeout=DNS_ZONE_UPDATE_CMD_TIMEOUT)
+
+    @mock.patch('subprocess.check_call')
+    def test_update_dns_zone_timeout(self, check_call_mock):
+        check_call_mock.side_effect = subprocess.TimeoutExpired([DNS_ZONE_UPDATE_CMD], DNS_ZONE_UPDATE_CMD_TIMEOUT)
+        ret_value = self.instance._trigger_dns_zone_update([])
+        self.assertFalse(ret_value)
+
+    @mock.patch('subprocess.check_call')
+    def test_update_dns_zone_error(self, check_call_mock):
+        check_call_mock.side_effect = subprocess.CalledProcessError(1, [DNS_ZONE_UPDATE_CMD])
+        ret_value = self.instance._trigger_dns_zone_update([])
+        self.assertFalse(ret_value)
+
     def test_certificate_management(self):
         self.instance.config = CertCentralConfig(
             accounts=[{'id': '1945e767ad72a532ebca519242a801bf', 'directory': 'https://127.0.0.1:14000/dir'}],
@@ -240,6 +278,7 @@ class CertCentralTest(unittest.TestCase):
                 {
                     'CN': 'certcentraltest.beta.wmflabs.org',
                     'SNI': ['certcentraltest.beta.wmflabs.org'],
+                    'challenge': 'http-01',
                 },
             },
             default_account='1945e767ad72a532ebca519242a801bf',
@@ -315,6 +354,7 @@ class CertCentralStatusTransitionTests(unittest.TestCase):
                 {
                     'CN': 'certcentraltest.beta.wmflabs.org',
                     'SNI': ['certcentraltest.beta.wmflabs.org'],
+                    'challenge': 'http-01',
                 },
             },
             default_account='1945e767ad72a532ebca519242a801bf',
@@ -366,15 +406,15 @@ class CertCentralStatusTransitionTests(unittest.TestCase):
         expected_key_calls = [mock.call(),
                               mock.call().generate(**KEY_TYPES['ec-prime256v1']['params']),
                               mock.call().save(self.instance._get_path('test_certificate',
-                                                                        'ec-prime256v1',
-                                                                        public=False,
-                                                                        kind='new'))]
+                                                                       'ec-prime256v1',
+                                                                       public=False,
+                                                                       kind='new'))]
         self.ec_key_mock.assert_has_calls(expected_key_calls)
         get_acme_session_mock.assert_called_once()
         acme_session_calls = [mock.call(self.instance.config.certificates['test_certificate']),
                               mock.call().push_csr(csr_mock.return_value)]
         get_acme_session_mock.assert_has_calls(acme_session_calls)
-        http_challenge_mock.assert_has_calls([mock.call.save(os.path.join(self.instance.http_challenges_path,
+        http_challenge_mock.assert_has_calls([mock.call.save(os.path.join(self.instance.challenges_path[ACMEChallengeType.HTTP01],
                                                                             http_challenge_mock.file_name))])
         handle_pushed_csr_mock.assert_called_once_with('test_certificate', 'ec-prime256v1')
         handle_pushed_challenges_mock.assert_called_once_with('test_certificate', 'ec-prime256v1')
@@ -488,6 +528,7 @@ class CertCentralDetermineStatusTest(unittest.TestCase):
                 {
                     'CN': 'certcentraltest.beta.wmflabs.org',
                     'SNI': ['certcentraltest.beta.wmflabs.org'],
+                    'challenge': 'http-01',
                 },
             },
             default_account='1945e767ad72a532ebca519242a801bf',
@@ -555,10 +596,12 @@ class CertCentralIntegrationTest(BasePebbleIntegrationTest):
                      CertCentral.live_certs_path,
                      CertCentral.csrs_path,
                      CertCentral.confd_path,
+                     CertCentral.dns_challenges_path,
                      CertCentral.http_challenges_path]:
             os.makedirs(os.path.join(base_path, path))
 
         HTTP01ChallengeHandler.challenges_path = os.path.join(base_path, CertCentral.http_challenges_path)
+        BaseDNSRequestHandler.challenges_path = os.path.join(base_path, CertCentral.dns_challenges_path)
 
     def tearDown(self):
         self.temp_dir.cleanup()
@@ -566,7 +609,7 @@ class CertCentralIntegrationTest(BasePebbleIntegrationTest):
     @mock.patch('acme_requests.TLS_VERIFY', False)
     @mock.patch('signal.signal')
     @mock.patch.object(CertCentral, 'sighup_handler')
-    def test_issue_new_certificate(self, a, b):
+    def test_issue_new_certificate_http01(self, a, b):
         # Step 1 - create an ACME account
         account = ACMEAccount.create('tests-certcentral@wikimedia.org',
                                      base_path=self.acme_account_base_path,
@@ -581,6 +624,54 @@ class CertCentralIntegrationTest(BasePebbleIntegrationTest):
                 {
                     'CN': 'certcentraltest.beta.wmflabs.org',
                     'SNI': ['certcentraltest.beta.wmflabs.org'],
+                    'challenge': 'http-01',
+                },
+            },
+            default_account=account.account_id,
+            authorized_hosts={
+                'test_certificate': ['localhost']
+            }
+        )
+        cert_central.cert_status = {'test_certificate': {
+            'ec-prime256v1': CertificateStatus.INITIAL,
+            'rsa-2048': CertificateStatus.INITIAL,
+        }}
+
+        # Step 3 - Generate self signed certificates
+        cert_central.create_initial_certs()
+        for cert_id in cert_central.cert_status:
+            for key_type_id in KEY_TYPES:
+                self.assertEqual(cert_central.cert_status[cert_id][key_type_id], CertificateStatus.SELF_SIGNED)
+                cert = Certificate.load(cert_central._get_path(cert_id, key_type_id, public=True, kind='live'))
+                self.assertTrue(cert.self_signed)
+
+        # Step 4 - Request new certificates
+        for cert_id in cert_central.cert_status:
+            for key_type_id in KEY_TYPES:
+                status = cert_central._new_certificate(cert_id, key_type_id)
+                self.assertEqual(status, CertificateStatus.VALID)
+                cert = Certificate.load(cert_central._get_path(cert_id, key_type_id, public=True, kind='live'))
+                self.assertFalse(cert.self_signed)
+
+    @mock.patch('acme_requests.TLS_VERIFY', False)
+    @mock.patch('signal.signal')
+    @mock.patch.object(CertCentral, 'sighup_handler')
+    def test_issue_new_certificate_dns01(self, a, b):
+        # Step 1 - create an ACME account
+        account = ACMEAccount.create('tests-certcentral@wikimedia.org',
+                                     base_path=self.acme_account_base_path,
+                                     directory_url=DIRECTORY_URL)
+        account.save()
+        # Step 2 - Generate CertCentral config
+        cert_central = CertCentral(base_path=self.temp_dir.name)
+        cert_central.config = CertCentralConfig(
+            accounts=[{'id': account.account_id, 'directory': DIRECTORY_URL}],
+            certificates={
+                'test_certificate':
+                {
+                    'CN': 'certcentraltest.beta.wmflabs.org',
+                    'SNI': ['certcentraltest.beta.wmflabs.org'],
+                    'challenge': 'dns-01',
                 },
             },
             default_account=account.account_id,
@@ -627,6 +718,7 @@ class CertCentralIntegrationTest(BasePebbleIntegrationTest):
                 {
                     'CN': 'certcentraltest.beta.wmflabs.org',
                     'SNI': ['certcentraltest.beta.wmflabs.org'],
+                    'challenge': 'http-01',
                 },
             },
             default_account=account.account_id,
@@ -650,14 +742,14 @@ class CertCentralIntegrationTest(BasePebbleIntegrationTest):
         # Step 4 - Request new certificates setting a wrong challenge location
         # to force a challenge validation issue
         with tempfile.TemporaryDirectory() as fake_challenge_dir:
-            valid_challenge_path = cert_central.http_challenges_path
-            cert_central.http_challenges_path = fake_challenge_dir
+            valid_challenge_path = cert_central.challenges_path[ACMEChallengeType.HTTP01]
+            cert_central.challenges_path[ACMEChallengeType.HTTP01] = fake_challenge_dir
             for cert_id in cert_central.cert_status:
                 for key_type_id in KEY_TYPES:
                     status = cert_central._new_certificate(cert_id, key_type_id)
                     self.assertEqual(status, CertificateStatus.SELF_SIGNED)
 
-            cert_central.http_challenges_path = valid_challenge_path
+            cert_central.challenges_path[ACMEChallengeType.HTTP01] = valid_challenge_path
 
         # Step 5 - Restart the process
         for cert_id in cert_central.cert_status:
@@ -686,6 +778,7 @@ class CertCentralIntegrationTest(BasePebbleIntegrationTest):
                 {
                     'CN': 'certcentraltest.beta.wmflabs.org',
                     'SNI': ['certcentraltest.beta.wmflabs.org'],
+                    'challenge': 'http-01',
                 },
             },
             default_account=account.account_id,

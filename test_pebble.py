@@ -70,6 +70,8 @@ class HTTP01ChallengeHandler(http.server.BaseHTTPRequestHandler):
         challenge_file.close()
 
 class BaseDNSRequestHandler(socketserver.BaseRequestHandler):
+    challenges_path = '/tmp'
+
     def get_data(self):
         return self.request[0].strip()
 
@@ -81,10 +83,28 @@ class BaseDNSRequestHandler(socketserver.BaseRequestHandler):
             data = self.get_data()
             query = dnslib.DNSRecord.parse(data)
             reply = query.reply()
-            answer = dnslib.RR(rname=reply.get_q().qname,
-                               ttl=60,
-                               rdata=dnslib.A(LISTEN_ADDRESS))
-            reply.add_answer(answer)
+            answers = []
+
+            if reply.get_q().qtype == dnslib.QTYPE.TXT:
+                try:
+                    challenge_files = os.listdir(BaseDNSRequestHandler.challenges_path)
+                    for challenge_file in challenge_files:
+                        if challenge_file.startswith(str(reply.get_q().qname).strip('.')):
+                            with open(os.path.join(BaseDNSRequestHandler.challenges_path,
+                                                   challenge_file), 'r') as challenge_data:
+                                answers.append(dnslib.RR(rname=reply.get_q().qname,
+                                                         rtype=reply.get_q().qtype,
+                                                         ttl=60,
+                                                         rdata=dnslib.TXT(challenge_data.read().strip())))
+                except OSError:
+                    pass
+            else:
+                answers.append(dnslib.RR(rname=reply.get_q().qname,
+                                         ttl=60,
+                                         rdata=dnslib.A(LISTEN_ADDRESS)))
+
+            for answer in answers:
+                reply.add_answer(answer)
             self.send_data(reply.pack())
         except Exception:
             pass

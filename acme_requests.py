@@ -54,12 +54,18 @@ class BaseACMEChallenge:
         self.challenge_type = challenge_type
         self.validation = validation
 
+    def save(self, file_name):
+        """Persists the challenge on disk"""
+        with open(file_name, 'w') as challenge_file:
+            challenge_file.write(self.validation)
+
 
 class DNS01ACMEChallenge(BaseACMEChallenge):
     """Class representing dns-01 challenge"""
     def __init__(self, validation_domain_name, validation):
         super().__init__(ACMEChallengeType.DNS01, validation)
         self.validation_domain_name = validation_domain_name
+        self.file_name = "{}-{}".format(validation_domain_name, validation)
 
 
 class HTTP01ACMEChallenge(BaseACMEChallenge):
@@ -69,11 +75,6 @@ class HTTP01ACMEChallenge(BaseACMEChallenge):
         self.hostname = hostname
         self.path = path
         self.file_name = path.split('/')[-1]
-
-    def save(self, file_name):
-        """Persists the challenge on disk"""
-        with open(file_name, 'w') as challenge_file:
-            challenge_file.write(self.validation)
 
 
 class ACMEAccount:

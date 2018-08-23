@@ -23,6 +23,7 @@ import collections
 import datetime
 import os
 import signal
+import subprocess
 from enum import Enum
 from time import sleep
 
@@ -68,6 +69,14 @@ CERTIFICATE_TYPES = {
         'file_name': '{cert_id}.{key_type_id}.chained.crt',
     }
 }
+
+CHALLENGE_TYPES = {
+    'dns-01': ACMEChallengeType.DNS01,
+    'http-01': ACMEChallengeType.HTTP01,
+}
+
+DNS_ZONE_UPDATE_CMD = '/bin/echo'  # TODO: Replace with the proper script
+DNS_ZONE_UPDATE_CMD_TIMEOUT = 60.0
 
 
 class CertificateStatus(Enum):
@@ -135,6 +144,7 @@ class CertCentral():
     config_path = 'config.yaml'
     confd_path = 'conf.d'
     http_challenges_path = 'http_challenges'
+    dns_challenges_path = 'dns_challenges'
 
     def __init__(self, base_path=BASEPATH):
         self.live_certs_path = os.path.join(base_path, CertCentral.live_certs_path)
@@ -143,7 +153,10 @@ class CertCentral():
         self.csrs_path = os.path.join(base_path, CertCentral.csrs_path)
         self.config_path = os.path.join(base_path, CertCentral.config_path)
         self.confd_path = os.path.join(base_path, CertCentral.confd_path)
-        self.http_challenges_path = os.path.join(base_path, CertCentral.http_challenges_path)
+        self.challenges_path = {
+            ACMEChallengeType.DNS01: os.path.join(base_path, CertCentral.dns_challenges_path),
+            ACMEChallengeType.HTTP01: os.path.join(base_path, CertCentral.http_challenges_path),
+        }
         self.config = None
         self.acme_sessions = dict()
         self.cert_status = collections.defaultdict(dict)
@@ -253,6 +266,30 @@ class CertCentral():
                                                                                         directory_url=directory_url))
         return self.acme_sessions[acme_account_id]
 
+    @staticmethod
+    def _trigger_dns_zone_update(challenges):
+        """Triggers a DNS zone update. returns True if everything goes as expected. False otherwise"""
+        params = []
+        for challenge in challenges:
+            params.append(challenge.validation_domain_name)
+            params.append(challenge.validation)
+
+        try:
+            subprocess.check_call([DNS_ZONE_UPDATE_CMD] + params,
+                                  stdout=subprocess.DEVNULL,
+                                  stderr=subprocess.DEVNULL,
+                                  timeout=DNS_ZONE_UPDATE_CMD_TIMEOUT)
+        except subprocess.CalledProcessError as cpe:
+            # TODO: log an error
+            print("Unexpected return code: {}".format(cpe.returncode))
+            return False
+        except subprocess.TimeoutExpired:
+            # TODO: log an error
+            print("Unable to update DNS zone in {} seconds".format(DNS_ZONE_UPDATE_CMD_TIMEOUT))
+            return False
+
+        return True
+
     def _new_certificate(self, cert_id, key_type_id):
         """Handles new certificate requests. It does the following steps:
             - Generates and persists on disk a private key of key_type_id type
@@ -275,12 +312,20 @@ class CertCentral():
         csr.save(csr_fullpath)
         session = self._get_acme_session(cert_details)
         challenges = session.push_csr(csr)
+        challenge_type = CHALLENGE_TYPES[cert_details['challenge']]
+        if challenge_type not in challenges:
+            # TODO: log a warning
+            return CertificateStatus.SELF_SIGNED
         try:
-            for challenge in challenges[ACMEChallengeType.HTTP01]:
-                challenge.save(os.path.join(self.http_challenges_path,
+            for challenge in challenges[challenge_type]:
+                challenge.save(os.path.join(self.challenges_path[challenge_type],
                                             challenge.file_name))
         except OSError:
             return CertificateStatus.SELF_SIGNED
+
+        if challenge_type == ACMEChallengeType.DNS01:
+            if not self._trigger_dns_zone_update(challenges[challenge_type]):
+                return CertificateStatus.SELF_SIGNED
 
         status = CertificateStatus.CSR_PUSHED
         status = self._handle_pushed_csr(cert_id, key_type_id)
@@ -307,8 +352,9 @@ class CertCentral():
             sans=cert_details['SNI'],
         )
         session = self._get_acme_session(cert_details)
+        challenge_type = CHALLENGE_TYPES[cert_details['challenge']]
         try:
-            session.push_solved_challenges(csr_id, challenge_type=ACMEChallengeType.HTTP01)
+            session.push_solved_challenges(csr_id, challenge_type=challenge_type)
         except ACMEOrderNotFound:
             # unable to find CSR in current ACME session, go back to the initial step
             return CertificateStatus.SELF_SIGNED

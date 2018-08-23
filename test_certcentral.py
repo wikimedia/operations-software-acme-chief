@@ -11,7 +11,8 @@ from acme_requests import ACMEAccount, ACMEChallengeType, ACMEError
 from certcentral import (KEY_TYPES, CertCentral, CertCentralConfig,
                          CertificateStatus)
 from test_pebble import BasePebbleIntegrationTest, HTTP01ChallengeHandler
-from x509 import Certificate, ECPrivateKey, PrivateKeyLoader, X509Error
+from x509 import (Certificate, CertificateSaveMode, ECPrivateKey,
+                  PrivateKeyLoader, X509Error)
 
 DIRECTORY_URL = 'https://127.0.0.1:14000/dir'
 
@@ -201,6 +202,35 @@ class CertCentralTest(unittest.TestCase):
                                                   directory_url='https://127.0.0.1:14000/dir')
         requests_mock.assert_called_once_with(account_load_mock.return_value)
         self.assertEqual(session, requests_mock.return_value)
+
+    @mock.patch.object(PrivateKeyLoader, 'load')
+    @mock.patch.object(Certificate, 'load')
+    @mock.patch.object(CertCentral, '_get_path')
+    def test_push_live_certificate(self, get_path_mock, certificate_load_mock, pkey_load_mock):
+        self.instance._push_live_certificate('test_certificate', 'rsa-2048')
+
+        get_path_new_calls = [mock.call('test_certificate', 'rsa-2048', kind='new', public=False),
+                              mock.call('test_certificate', 'rsa-2048',
+                                        cert_type='full_chain', kind='new', public=True)]
+        get_path_mock.assert_has_calls(get_path_new_calls, any_order=True)
+        get_path_live_calls = [mock.call('test_certificate', 'rsa-2048', kind='live', public=False),
+                               mock.call('test_certificate', 'rsa-2048',
+                                         cert_type='cert_only', kind='live', public=True),
+                               mock.call('test_certificate', 'rsa-2048',
+                                         cert_type='chain_only', kind='live', public=True),
+                               mock.call('test_certificate', 'rsa-2048',
+                                         cert_type='full_chain', kind='live', public=True)]
+        get_path_mock.assert_has_calls(get_path_live_calls, any_order=True)
+        certificate_load_mock_calls = [mock.call(get_path_mock.return_value),
+                                       mock.call().save(get_path_mock.return_value,
+                                                        mode=CertificateSaveMode.CERT_ONLY),
+                                       mock.call().save(get_path_mock.return_value,
+                                                        mode=CertificateSaveMode.CHAIN_ONLY),
+                                       mock.call().save(get_path_mock.return_value,
+                                                        mode=CertificateSaveMode.FULL_CHAIN)]
+        certificate_load_mock.assert_has_calls(certificate_load_mock_calls, any_order=True)
+        pkey_load_calls = [mock.call(get_path_mock.return_value), mock.call().save(get_path_mock.return_value)]
+        pkey_load_mock.assert_has_calls(pkey_load_calls)
 
     def test_certificate_management(self):
         self.instance.config = CertCentralConfig(
@@ -437,7 +467,9 @@ class CertCentralStatusTransitionTests(unittest.TestCase):
                               mock.call().get_certificate(csr_mock.generate_csr_id.return_value),
                               mock.call().get_certificate().save(self.instance._get_path('test_certificate',
                                                                                          'rsa-2048', public=True,
-                                                                                         kind='new'))
+                                                                                         kind='new',
+                                                                                         cert_type='full_chain'),
+                                                                 mode=CertificateSaveMode.FULL_CHAIN)
         ]
         get_acme_session_mock.assert_has_calls(acme_session_calls)
         push_live_mock.assert_called_once_with('test_certificate', 'rsa-2048')

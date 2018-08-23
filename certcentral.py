@@ -32,9 +32,9 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from acme_requests import (ACMEAccount, ACMEChallengeType, ACMEError,
                            ACMEInvalidChallengeError, ACMEOrderNotFound,
                            ACMERequests)
-from x509 import (Certificate, CertificateSigningRequest, ECPrivateKey,
-                  PrivateKeyLoader, RSAPrivateKey, SelfSignedCertificate,
-                  X509Error)
+from x509 import (Certificate, CertificateSaveMode, CertificateSigningRequest,
+                  ECPrivateKey, PrivateKeyLoader, RSAPrivateKey,
+                  SelfSignedCertificate, X509Error)
 
 BASEPATH = '/etc/certcentral'
 KEY_TYPES = {
@@ -49,6 +49,23 @@ KEY_TYPES = {
         'params': {
             'size': 2048,
         }
+    }
+}
+
+# naming schema borrowed from
+# https://phabricator.wikimedia.org/source/operations-puppet/browse/production/modules/letsencrypt/manifests/cert/integrated.pp
+CERTIFICATE_TYPES = {
+    'cert_only': {
+        'save_mode': CertificateSaveMode.CERT_ONLY,
+        'file_name': '{cert_id}.{key_type_id}.crt',
+    },
+    'chain_only': {
+        'save_mode': CertificateSaveMode.CHAIN_ONLY,
+        'file_name': '{cert_id}.{key_type_id}.chain.crt',
+    },
+    'full_chain': {
+        'save_mode': CertificateSaveMode.FULL_CHAIN,
+        'file_name': '{cert_id}.{key_type_id}.chained.crt',
     }
 }
 
@@ -133,18 +150,17 @@ class CertCentral():
         signal.signal(signal.SIGHUP, self.sighup_handler)
         self.sighup_handler()
 
-    def _get_path(self, cert_id, key_type_id, public=True, kind='live'):
+    def _get_path(self, cert_id, key_type_id, public=True, kind='live', cert_type='cert_only'):
         if public:
-            part = 'public'
+            file_name = CERTIFICATE_TYPES[cert_type]['file_name'].format(cert_id=cert_id, key_type_id=key_type_id)
         else:
-            part = 'private'
+            file_name = '{}.{}.key'.format(cert_id, key_type_id)
 
         if kind == 'live':
             base = self.live_certs_path
         else:
             base = self.new_certs_path
 
-        file_name = '{}.{}.{}.pem'.format(cert_id, key_type_id, part)
         return os.path.join(base, file_name)
 
     def _set_cert_status(self):
@@ -333,16 +349,20 @@ class CertCentral():
         if certificate is None:
             return CertificateStatus.CHALLENGES_PUSHED
 
-        certificate.save(self._get_path(cert_id, key_type_id, public=True, kind='new'))
+        certificate.save(self._get_path(cert_id, key_type_id, public=True, kind='new', cert_type='full_chain'),
+                         mode=CertificateSaveMode.FULL_CHAIN)
         return self._push_live_certificate(cert_id, key_type_id)
 
     def _push_live_certificate(self, cert_id, key_type_id):
         """Moves a new certificate to the live path after checking that everything looks sane"""
         try:
             private_key = PrivateKeyLoader.load(self._get_path(cert_id, key_type_id, public=False, kind='new'))
-            cert = Certificate.load(self._get_path(cert_id, key_type_id, public=True, kind='new'))
+            cert = Certificate.load(self._get_path(cert_id, key_type_id,
+                                                   public=True, kind='new', cert_type='full_chain'))
             private_key.save(self._get_path(cert_id, key_type_id, public=False, kind='live'))
-            cert.save(self._get_path(cert_id, key_type_id, public=True, kind='live'))
+            for cert_type, cert_type_details in CERTIFICATE_TYPES.items():
+                cert.save(self._get_path(cert_id, key_type_id, public=True, kind='live', cert_type=cert_type),
+                          mode=cert_type_details['save_mode'])
         except (OSError, X509Error):
             return CertificateStatus.SELF_SIGNED
 

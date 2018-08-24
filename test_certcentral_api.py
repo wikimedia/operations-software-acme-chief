@@ -51,7 +51,7 @@ class CertCentralApiTest(unittest.TestCase):
     @staticmethod
     def _get_valid_parts():
         for key_type in KEY_TYPES:
-            for file_name in ['{}.public.pem', '{}.private.pem']:
+            for file_name in ['{}.crt', '{}.chain.crt', '{}.chained.crt', '{}.key']:
                 yield file_name.format(key_type)
 
     def _populate_files(self):
@@ -67,7 +67,7 @@ class CertCentralApiTest(unittest.TestCase):
     def test_get_without_headers(self):
         args = {
             'certname': list(self.config.certificates.keys())[0],
-            'part': 'ec-prime256v1.public.pem',
+            'part': 'ec-prime256v1.crt',
             'api': 'content',
         }
 
@@ -91,7 +91,7 @@ class CertCentralApiTest(unittest.TestCase):
     def test_get_unknown_certificate(self):
         args = {
             'certname': 'foo_certificate',
-            'part': 'ec-prime256v1.public.pem',
+            'part': 'ec-prime256v1.crt',
             'api': 'content',
         }
 
@@ -103,7 +103,7 @@ class CertCentralApiTest(unittest.TestCase):
     def test_access_denied(self):
         args = {
             'certname': list(self.config.certificates.keys())[0],
-            'part': 'ec-prime256v1.public.pem',
+            'part': 'ec-prime256v1.crt',
             'api': 'content',
         }
 

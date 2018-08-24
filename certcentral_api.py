@@ -78,8 +78,10 @@ def create_app(base_path=BASEPATH, cert_central_config=None):
 
         valid_parts = []
         for key_type_id in KEY_TYPES:
-            valid_parts.append('{}.public.pem'.format(key_type_id))
-            valid_parts.append('{}.private.pem'.format(key_type_id))
+            valid_parts.append('{}.crt'.format(key_type_id))
+            valid_parts.append('{}.chain.crt'.format(key_type_id))
+            valid_parts.append('{}.chained.crt'.format(key_type_id))
+            valid_parts.append('{}.key'.format(key_type_id))
 
         if part not in valid_parts:
             abort(400, 'part must be in {}'.format(valid_parts))

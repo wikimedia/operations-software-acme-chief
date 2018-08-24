@@ -1,4 +1,5 @@
 import os
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -8,7 +9,8 @@ from datetime import datetime, timedelta
 import mock
 from cryptography.hazmat.primitives.asymmetric import ec
 
-from acme_requests import (ACMEAccount, ACMEChallengeType, ACMEError,
+from acme_requests import (ACMEAccount, ACMEChallengeType,
+                           ACMEChallengeValidation, ACMEError,
                            DNS01ACMEChallenge)
 from certcentral import (DNS_ZONE_UPDATE_CMD, DNS_ZONE_UPDATE_CMD_TIMEOUT,
                          KEY_TYPES, CertCentral, CertCentralConfig,
@@ -387,11 +389,8 @@ class CertCentralStatusTransitionTests(unittest.TestCase):
     @mock.patch('certcentral.CertificateSigningRequest')
     @mock.patch.object(CertCentral, '_get_acme_session')
     @mock.patch.object(CertCentral, '_handle_pushed_csr')
-    @mock.patch.object(CertCentral, '_handle_pushed_challenges')
-    def test_new_certificate(self, handle_pushed_challenges_mock, handle_pushed_csr_mock, get_acme_session_mock, csr_mock):
-
-        handle_pushed_csr_mock.return_value = CertificateStatus.CHALLENGES_PUSHED
-        handle_pushed_challenges_mock.return_value = CertificateStatus.VALID
+    def test_new_certificate(self, handle_pushed_csr_mock, get_acme_session_mock, csr_mock):
+        handle_pushed_csr_mock.return_value = CertificateStatus.VALID
         http_challenge_mock = mock.MagicMock()
         http_challenge_mock.file_name = 'mocked_challenged_file_name'
         get_acme_session_mock.return_value.push_csr.return_value = {
@@ -414,10 +413,9 @@ class CertCentralStatusTransitionTests(unittest.TestCase):
         acme_session_calls = [mock.call(self.instance.config.certificates['test_certificate']),
                               mock.call().push_csr(csr_mock.return_value)]
         get_acme_session_mock.assert_has_calls(acme_session_calls)
-        http_challenge_mock.assert_has_calls([mock.call.save(os.path.join(self.instance.challenges_path[ACMEChallengeType.HTTP01],
-                                                                            http_challenge_mock.file_name))])
-        handle_pushed_csr_mock.assert_called_once_with('test_certificate', 'ec-prime256v1')
-        handle_pushed_challenges_mock.assert_called_once_with('test_certificate', 'ec-prime256v1')
+        http_challenge_mock_call = [mock.call.save(os.path.join(self.instance.challenges_path[ACMEChallengeType.HTTP01],
+                                                                http_challenge_mock.file_name))]
+        http_challenge_mock.assert_has_calls(http_challenge_mock_call)
         self.assertEqual(status, CertificateStatus.VALID)
 
     @mock.patch.object(PrivateKeyLoader, 'load')
@@ -431,18 +429,64 @@ class CertCentralStatusTransitionTests(unittest.TestCase):
     @mock.patch.object(PrivateKeyLoader, 'load')
     @mock.patch('certcentral.CertificateSigningRequest')
     @mock.patch.object(CertCentral, '_get_acme_session')
-    @mock.patch.object(CertCentral, '_handle_pushed_challenges')
-    def test_handle_pushed_csr(self, handle_pushed_challenges_mock, get_acme_session_mock, csr_mock, pkey_loader_mock):
-        handle_pushed_challenges_mock.return_value = CertificateStatus.VALID
+    @mock.patch.object(CertCentral, '_handle_validated_challenges')
+    def test_handle_pushed_csr(self, handle_validated_challenges_mock,
+                               get_acme_session_mock, csr_mock, pkey_loader_mock):
+        handle_validated_challenges_mock.return_value = CertificateStatus.VALID
+        challenge_mock = mock.MagicMock()
+        challenge_mock.validate.return_value = ACMEChallengeValidation.VALID
+        mocked_acme_session = mock.MagicMock()
+        mocked_acme_session.challenges = {
+            csr_mock.generate_csr_id.return_value: {
+                ACMEChallengeType.HTTP01: [challenge_mock],
+            }
+        }
+        get_acme_session_mock.return_value = mocked_acme_session
         status = self.instance._handle_pushed_csr('test_certificate', 'rsa-2048')
         self.assertEqual(status, CertificateStatus.VALID)
-        pkey_loader_calls = [mock.call(self.instance._get_path('test_certificate', 'rsa-2048', public=False, kind='new'))]
+
+        pkey_loader_calls = [mock.call(self.instance._get_path('test_certificate', 'rsa-2048',
+                                                               public=False, kind='new'))]
         pkey_loader_mock.assert_has_calls(pkey_loader_calls)
-        csr_expected_calls = [mock.call.generate_csr_id(common_name='certcentraltest.beta.wmflabs.org', public_key_pem=pkey_loader_mock.return_value.public_pem, sans=['certcentraltest.beta.wmflabs.org'])]
+
+        csr_expected_calls = [mock.call.generate_csr_id(common_name='certcentraltest.beta.wmflabs.org',
+                                                        public_key_pem=pkey_loader_mock.return_value.public_pem,
+                                                        sans=['certcentraltest.beta.wmflabs.org'])]
+        csr_mock.assert_has_calls(csr_expected_calls)
+
+        acme_session_calls = [mock.call(self.instance.config.certificates['test_certificate'])]
+        get_acme_session_mock.assert_has_calls(acme_session_calls)
+        challenge_mock.assert_has_calls([mock.call.validate()])
+        handle_validated_challenges_mock.assert_called_once_with('test_certificate', 'rsa-2048')
+
+    @mock.patch.object(PrivateKeyLoader, 'load')
+    def test_handle_validated_challenges_pkey_error(self, pkey_loader_mock):
+        for side_effect in [OSError, X509Error]:
+            pkey_loader_mock.reset_mock()
+            pkey_loader_mock.side_effect = side_effect
+            status = self.instance._handle_validated_challenges('test_certificate', 'rsa-2048')
+            self.assertEqual(status, CertificateStatus.SELF_SIGNED)
+
+    @mock.patch.object(PrivateKeyLoader, 'load')
+    @mock.patch('certcentral.CertificateSigningRequest')
+    @mock.patch.object(CertCentral, '_get_acme_session')
+    @mock.patch.object(CertCentral, '_handle_pushed_challenges')
+    def test_handle_validated_challenges(self, handle_pushed_challenges_mock, get_acme_session_mock,
+                                         csr_mock, pkey_loader_mock):
+        handle_pushed_challenges_mock.return_value = CertificateStatus.VALID
+        status = self.instance._handle_validated_challenges('test_certificate', 'rsa-2048')
+        self.assertEqual(status, CertificateStatus.VALID)
+        pkey_loader_calls = [mock.call(self.instance._get_path('test_certificate',
+                                                               'rsa-2048', public=False, kind='new'))]
+        pkey_loader_mock.assert_has_calls(pkey_loader_calls)
+        csr_expected_calls = [mock.call.generate_csr_id(common_name='certcentraltest.beta.wmflabs.org',
+                                                        public_key_pem=pkey_loader_mock.return_value.public_pem,
+                                                        sans=['certcentraltest.beta.wmflabs.org'])]
         csr_mock.assert_has_calls(csr_expected_calls)
         get_acme_session_mock.assert_called_once()
         acme_session_calls = [mock.call(self.instance.config.certificates['test_certificate']),
-                              mock.call().push_solved_challenges(csr_mock.generate_csr_id.return_value, challenge_type=ACMEChallengeType.HTTP01)]
+                              mock.call().push_solved_challenges(csr_mock.generate_csr_id.return_value,
+                                                                 challenge_type=ACMEChallengeType.HTTP01)]
         get_acme_session_mock.assert_has_calls(acme_session_calls)
         handle_pushed_challenges_mock.assert_called_once_with('test_certificate', 'rsa-2048')
 
@@ -451,9 +495,10 @@ class CertCentralStatusTransitionTests(unittest.TestCase):
     @mock.patch('certcentral.CertificateSigningRequest')
     @mock.patch.object(CertCentral, '_get_acme_session')
     @mock.patch.object(CertCentral, '_handle_pushed_challenges')
-    def test_handle_pushed_csr_solved_acme_error(self, handle_pushed_challenges_mock, get_acme_session_mock, csr_mock, pkey_loader_mock):
+    def test_handle_validated_challenges_solved_acme_error(self, handle_pushed_challenges_mock, get_acme_session_mock,
+                                                           csr_mock, pkey_loader_mock):
         handle_pushed_challenges_mock.side_effect = ACMEError
-        status = self.instance._handle_pushed_csr('test_certificate', 'rsa-2048')
+        status = self.instance._handle_validated_challenges('test_certificate', 'rsa-2048')
         self.assertEqual(status, CertificateStatus.CHALLENGES_PUSHED)
         pkey_loader_calls = [mock.call(self.instance._get_path('test_certificate', 'rsa-2048',
                                                                public=False, kind='new'))]
@@ -602,9 +647,22 @@ class CertCentralIntegrationTest(BasePebbleIntegrationTest):
 
         HTTP01ChallengeHandler.challenges_path = os.path.join(base_path, CertCentral.http_challenges_path)
         BaseDNSRequestHandler.challenges_path = os.path.join(base_path, CertCentral.dns_challenges_path)
+        proxy_host, proxy_port = self.proxy_server.server_address
+        proxy_url = 'http://{}:{}'.format(proxy_host, proxy_port)
+        dns_host, dns_port = self.dns_server.server_address
+        self.patchers = [
+            mock.patch.dict('acme_requests.HTTP_VALIDATOR_PROXIES', {'http': proxy_url}),
+            mock.patch('acme_requests.DNS_SERVERS', [dns_host]),
+            mock.patch('acme_requests.DNS_PORT', dns_port),
+        ]
+        for patcher in self.patchers:
+            patcher.start()
 
     def tearDown(self):
         self.temp_dir.cleanup()
+        for patcher in self.patchers:
+            patcher.stop()
+
 
     @mock.patch('acme_requests.TLS_VERIFY', False)
     @mock.patch('signal.signal')
@@ -747,14 +805,18 @@ class CertCentralIntegrationTest(BasePebbleIntegrationTest):
             for cert_id in cert_central.cert_status:
                 for key_type_id in KEY_TYPES:
                     status = cert_central._new_certificate(cert_id, key_type_id)
-                    self.assertEqual(status, CertificateStatus.SELF_SIGNED)
+                    self.assertEqual(status, CertificateStatus.CSR_PUSHED)
 
             cert_central.challenges_path[ACMEChallengeType.HTTP01] = valid_challenge_path
+            # Copy the challenges to the correct challenge path
+            for challenge_file in os.listdir(fake_challenge_dir):
+                challenge_file_path = os.path.join(fake_challenge_dir, challenge_file)
+                shutil.copy2(challenge_file_path, valid_challenge_path)
 
-        # Step 5 - Restart the process
+        # Step 5 - Resume the process
         for cert_id in cert_central.cert_status:
             for key_type_id in KEY_TYPES:
-                status = cert_central._new_certificate(cert_id, key_type_id)
+                status = cert_central._handle_pushed_csr(cert_id, key_type_id)
                 self.assertEqual(status, CertificateStatus.VALID)
                 cert = Certificate.load(cert_central._get_path(cert_id, key_type_id, public=True, kind='live'))
                 self.assertFalse(cert.self_signed)

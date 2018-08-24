@@ -4,14 +4,19 @@ Module containing ACMEv2 client classes
 Valentin Gutierrez <vgutierrez@wikimedia.org> 2018
 Wikimedia Foundation 2018
 """
+import abc
 import hashlib
 import os
 from collections import defaultdict
 from datetime import datetime, timedelta
 from enum import Enum
+from urllib.parse import urlunparse
 
+import dns.exception
+import dns.resolver
 import josepy as jose
 import OpenSSL
+import requests
 from acme import client, errors, messages
 
 # TODO: move secure_opener out of x509
@@ -21,7 +26,15 @@ from x509 import (Certificate, CertificateRevokeReason,
 
 BASEPATH = '/etc/certcentral/accounts'
 DIRECTORY_URL = 'https://acme-v02.api.letsencrypt.org/directory'
-TLS_VERIFY = True
+TLS_VERIFY = True   # intended to be used during testing
+DNS_PORT = 53       # intended to be used during testing
+DNS_SERVERS = None  # intended to be used during testing
+HTTP_VALIDATOR_PROXIES = {
+    'http': os.getenv('HTTP_PROXY'),
+    'https': os.getenv('HTTPS_PROXY'),
+}
+DEFAULT_DNS01_VALIDATION_TIMEOUT = 2.0
+DEFAULT_HTTP01_VALIDATION_TIMEOUT = 2.0
 
 
 class ACMEError(Exception):
@@ -48,7 +61,14 @@ class ACMEChallengeType(Enum):
     HTTP01 = 'http-01'
 
 
-class BaseACMEChallenge:
+class ACMEChallengeValidation(Enum):
+    """Possible results of challenge validation"""
+    VALID = 1
+    INVALID = 2
+    UNKNOWN = 3
+
+
+class BaseACMEChallenge(abc.ABC):
     """Base ACME challenges class"""
     def __init__(self, challenge_type, validation):
         self.challenge_type = challenge_type
@@ -59,6 +79,10 @@ class BaseACMEChallenge:
         with open(file_name, 'w') as challenge_file:
             challenge_file.write(self.validation)
 
+    @abc.abstractmethod
+    def validate(self, **kwargs):
+        """Checks if the challenge has been fulfilled or not. Returns a member of ACMEChallengeValidation"""
+
 
 class DNS01ACMEChallenge(BaseACMEChallenge):
     """Class representing dns-01 challenge"""
@@ -66,6 +90,28 @@ class DNS01ACMEChallenge(BaseACMEChallenge):
         super().__init__(ACMEChallengeType.DNS01, validation)
         self.validation_domain_name = validation_domain_name
         self.file_name = "{}-{}".format(validation_domain_name, validation)
+
+    def validate(self, **kwargs):
+        resolver = dns.resolver.Resolver()
+        resolver.port = DNS_PORT
+        if DNS_SERVERS is not None:
+            resolver.nameservers = DNS_SERVERS
+        resolver.timeout = kwargs.get('timeout', DEFAULT_DNS01_VALIDATION_TIMEOUT)
+        resolver.lifetime = kwargs.get('timeout', DEFAULT_DNS01_VALIDATION_TIMEOUT)
+
+        try:
+            answer = resolver.query(self.validation_domain_name, rdtype='TXT')
+        except (dns.resolver.NXDOMAIN, dns.resolver.YXDOMAIN, dns.resolver.NoAnswer):
+            return ACMEChallengeValidation.INVALID
+        except (dns.exception.Timeout, dns.resolver.NoNameservers):
+            return ACMEChallengeValidation.UNKNOWN
+
+        for rrset in answer.rrset:
+            txt_data = rrset.to_text().strip('"')
+            if txt_data == self.validation:
+                return ACMEChallengeValidation.VALID
+
+        return ACMEChallengeValidation.INVALID
 
 
 class HTTP01ACMEChallenge(BaseACMEChallenge):
@@ -75,6 +121,32 @@ class HTTP01ACMEChallenge(BaseACMEChallenge):
         self.hostname = hostname
         self.path = path
         self.file_name = path.split('/')[-1]
+
+    def validate(self, **kwargs):
+        timeout = kwargs.get('timeout', DEFAULT_HTTP01_VALIDATION_TIMEOUT)
+        server = kwargs.get('server', self.hostname)
+        port = kwargs.get('port', 80)
+
+        headers = {'Host': self.hostname}
+        url = urlunparse((
+            'http',
+            "{}:{}".format(server, port),
+            self.path,
+            '',
+            '',
+            ''))
+        try:
+            response = requests.get(url, headers=headers, proxies=HTTP_VALIDATOR_PROXIES, timeout=timeout)
+            response.raise_for_status()
+        except requests.exceptions.Timeout:
+            return ACMEChallengeValidation.UNKNOWN
+        except (requests.exceptions.HTTPError, requests.exceptions.TooManyRedirects):
+            return ACMEChallengeValidation.INVALID
+
+        if response.text == self.validation:
+            return ACMEChallengeValidation.VALID
+
+        return ACMEChallengeValidation.INVALID
 
 
 class ACMEAccount:
@@ -163,6 +235,7 @@ class ACMERequests:
     def __init__(self, acme_account):
         self.acme_account = acme_account
         self.acme_client = acme_account.client
+        self.challenges = {}
         self.orders = {}
 
         if not self._account_is_valid():
@@ -225,7 +298,9 @@ class ACMERequests:
 
         self.orders[csr.csr_id] = new_order
 
-        return self._get_challenges_from_order(new_order, csr.wildcard)
+        self.challenges[csr.csr_id] = self._get_challenges_from_order(new_order, csr.wildcard)
+
+        return self.challenges[csr.csr_id]
 
     def push_solved_challenges(self, csr_id, challenge_type=ACMEChallengeType.DNS01):
         """
@@ -276,6 +351,7 @@ class ACMERequests:
             raise ACMEError('Received invalid PEM from ACME server') from certificate_error
 
         del self.orders[csr_id]
+        del self.challenges[csr_id]
         return certificate
 
     def revoke_certificate(self, certificate, reason=CertificateRevokeReason.UNSPECIFIED):

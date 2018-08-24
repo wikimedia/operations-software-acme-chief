@@ -10,8 +10,10 @@ import threading
 import time
 import unittest
 from datetime import datetime, timedelta
+from urllib.parse import urlparse, urlunparse
 
 import dnslib
+import requests
 
 from x509 import RSAPrivateKey, SelfSignedCertificate
 
@@ -35,7 +37,7 @@ def tcp_wait(port, timeout=3):
         try:
             s = socket.socket()
             s.settimeout(socket_timeout)
-            s.connect(('127.0.0.1', int(port)))
+            s.connect((LISTEN_ADDRESS, int(port)))
             connected = True
             break
         except (ConnectionAbortedError, ConnectionRefusedError):
@@ -47,6 +49,33 @@ def tcp_wait(port, timeout=3):
     if not connected:
         raise TimeoutError(
             'Could not connect to port %s after %s seconds' % (port, timeout))
+
+
+class HTTPProxyHandler(http.server.BaseHTTPRequestHandler):
+    """Pretty simple HTTP proxy server used to trick requests into connecting to
+       our http challenge server without altering production code
+    """
+    timeout = 3.0
+    server = LISTEN_ADDRESS
+    port = 8080
+
+    def do_GET(self):
+        request_url = urlparse(self.path)
+
+        url = urlunparse((
+            'http',
+            "{}:{}".format(HTTPProxyHandler.server, HTTPProxyHandler.port),
+            request_url.path,
+            '',
+            '',
+            ''))
+        response = requests.get(url, stream=True, proxies=None, timeout=HTTPProxyHandler.timeout)
+        self.send_response(response.status_code)
+        for header_name, header_value in response.headers.items():
+            self.send_header(header_name, header_value)
+        self.end_headers()
+
+        self.wfile.write(response.content)
 
 
 class HTTP01ChallengeHandler(http.server.BaseHTTPRequestHandler):
@@ -169,9 +198,18 @@ class BasePebbleIntegrationTest(unittest.TestCase):
             cls.http_server = socketserver.ThreadingTCPServer((LISTEN_ADDRESS, 0), HTTP01ChallengeHandler)
             cls.http_server_thread = threading.Thread(target=cls.http_server.serve_forever)
             cls.http_server_thread.start()
+            cls.proxy_server = socketserver.ThreadingTCPServer((LISTEN_ADDRESS, 0), HTTPProxyHandler)
+            cls.proxy_server_thread = threading.Thread(target=cls.proxy_server.serve_forever)
+            cls.proxy_server_thread.start()
 
             _, dns_port = cls.dns_server.server_address
             _, http_port = cls.http_server.server_address
+            _, proxy_port = cls.proxy_server.server_address
+
+            tcp_wait(http_port)
+            tcp_wait(proxy_port)
+
+            HTTPProxyHandler.port = http_port
             env_vars['PEBBLE_VA_ALWAYS_VALID'] = '0'
             env_vars['PEBBLE_VA_NOSLEEP'] = '1'
             cmd_flags.append('-dnsserver={}:{}'.format(LISTEN_ADDRESS, dns_port))
@@ -209,3 +247,6 @@ class BasePebbleIntegrationTest(unittest.TestCase):
             cls.http_server.shutdown()
             cls.http_server.server_close()
             cls.http_server_thread.join()
+            cls.proxy_server.shutdown()
+            cls.proxy_server.server_close()
+            cls.proxy_server_thread.join()

@@ -30,7 +30,8 @@ from time import sleep
 import yaml
 from cryptography.hazmat.primitives.asymmetric import ec
 
-from acme_requests import (ACMEAccount, ACMEChallengeType, ACMEError,
+from acme_requests import (ACMEAccount, ACMEChallengeType,
+                           ACMEChallengeValidation, ACMEError,
                            ACMEInvalidChallengeError, ACMEOrderNotFound,
                            ACMERequests)
 from x509 import (Certificate, CertificateSaveMode, CertificateSigningRequest,
@@ -82,12 +83,13 @@ DNS_ZONE_UPDATE_CMD_TIMEOUT = 60.0
 class CertificateStatus(Enum):
     """Certificate status definition"""
     INITIAL = 1
-    SELF_SIGNED = 2         # initial self-signed certificate issued to let services start
-    CSR_PUSHED = 3          # CSR pushed to the ACME directory and challenges saved on disk
-    CHALLENGES_PUSHED = 4   # Challenges pushed to the ACME directory
-    VALID = 5               # Valid certificate
-    NEEDS_RENEWAL = 6       # Valid certificate that needs to be renew soon!
-    EXPIRED = 7             # Expired certificate
+    SELF_SIGNED = 2           # initial self-signed certificate issued to let services start
+    CSR_PUSHED = 3            # CSR pushed to the ACME directory and challenges saved on disk
+    CHALLENGES_VALIDATED = 4  # Challenges have been successfully validated
+    CHALLENGES_PUSHED = 5     # Challenges pushed to the ACME directory
+    VALID = 6                 # Valid certificate
+    NEEDS_RENEWAL = 7         # Valid certificate that needs to be renew soon!
+    EXPIRED = 8               # Expired certificate
 
 
 class CertCentralConfig:
@@ -329,13 +331,49 @@ class CertCentral():
 
         status = CertificateStatus.CSR_PUSHED
         status = self._handle_pushed_csr(cert_id, key_type_id)
-        if status is CertificateStatus.CHALLENGES_PUSHED:
-            status = self._handle_pushed_challenges(cert_id, key_type_id)
 
         return status
 
     def _handle_pushed_csr(self, cert_id, key_type_id):
         """Handles PUSHED_CSR status. Performs the following actions:
+            - Checks that challenges have been validated
+            - Passes the ball to the next status handle
+        """
+        try:
+            private_key = PrivateKeyLoader.load(self._get_path(cert_id, key_type_id, public=False, kind='new'))
+        except (OSError, X509Error):
+            return CertificateStatus.SELF_SIGNED
+
+        cert_details = self.config.certificates[cert_id]
+
+        csr_id = CertificateSigningRequest.generate_csr_id(
+            public_key_pem=private_key.public_pem,
+            common_name=cert_details['CN'],
+            sans=cert_details['SNI'],
+        )
+
+        challenge_type = CHALLENGE_TYPES[cert_details['challenge']]
+
+        session = self._get_acme_session(cert_details)
+
+        try:
+            challenges = session.challenges[csr_id][challenge_type]
+        except KeyError:
+            return CertificateStatus.SELF_SIGNED
+
+        for challenge in challenges:
+            if challenge.validate() is not ACMEChallengeValidation.VALID:
+                # keep the issuance process in this step till all the challenges have been validated
+                # TODO: log a warning
+                return CertificateStatus.CSR_PUSHED
+
+        status = CertificateStatus.CHALLENGES_VALIDATED
+        status = self._handle_validated_challenges(cert_id, key_type_id)
+
+        return status
+
+    def _handle_validated_challenges(self, cert_id, key_type_id):
+        """Handles CHALLENGES_VALIDATED status. Performs the following actions:
             - pushes solved challenges to the ACME directory
             - Passes the ball to the next status handler
         """

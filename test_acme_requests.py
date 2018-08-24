@@ -3,12 +3,15 @@ import os
 import tempfile
 import unittest
 
+import dns
 import mock
+import requests_mock
 from cryptography import x509 as crypto_x509
 from cryptography.x509.oid import ExtensionOID, NameOID
 
 from acme_requests import (ACMEAccount, ACMEAccountFiles, ACMEChallengeType,
-                           ACMERequests, HTTP01ACMEChallenge)
+                           ACMEChallengeValidation, ACMERequests,
+                           DNS01ACMEChallenge, HTTP01ACMEChallenge)
 from test_pebble import BasePebbleIntegrationTest
 from x509 import (CertificateSigningRequest, ECPrivateKey, RSAPrivateKey,
                   SelfSignedCertificate)
@@ -27,17 +30,117 @@ class ACMEAccountTest(unittest.TestCase):
 
 
 class ACMEChallengeTest(unittest.TestCase):
-    def test_save_http(self):
-        challenge = HTTP01ACMEChallenge(hostname='tests.wmflabs.org',
-                                        path='/.well-known/acme-challenge/BMHfMfFy0DtWYRwjxMFFSkmYZS5azT58-4YDrWfW_l4',
-                                        validation='BMHfMfFy0DtWYRwjxMFFSkmYZS5azT58-4YDrWfW_l4.xnhzweFE-KO1EIuyHhY7iFw7ROdIN_uPCXG2tYK-Sv8')
-        with tempfile.TemporaryDirectory() as temp_dir:
-            challenge_path = os.path.join(temp_dir, challenge.file_name)
-            challenge.save(os.path.join(challenge_path))
+    def test_save(self):
+        challenges = [HTTP01ACMEChallenge(hostname='tests.wmflabs.org',
+                                          path='/.well-known/acme-challenge/BMHfMfFy0DtWYRwjxMFFSkmYZS5azT58-4YDrWfW_l4',
+                                          validation='BMHfMfFy0DtWYRwjxMFFSkmYZS5azT58-4YDrWfW_l4.xnhzweFE-KO1EIuyHhY7iFw7ROdIN_uPCXG2tYK-Sv8'),
+                      DNS01ACMEChallenge(validation_domain_name='_acme-challenge.tests.wmflab.org',
+                                         validation="fake_validation"),
+        ]
+        for challenge in challenges:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                challenge_path = os.path.join(temp_dir, challenge.file_name)
+                challenge.save(os.path.join(challenge_path))
 
-            with open(challenge_path, 'r') as challenge_file:
-                validation = challenge_file.read()
-                self.assertEqual(validation, challenge.validation)
+                with open(challenge_path, 'r') as challenge_file:
+                    validation = challenge_file.read()
+                    self.assertEqual(validation, challenge.validation)
+
+    def test_validate_http(self):
+        challenge = HTTP01ACMEChallenge(hostname='tests.wmflabs.org',
+                                        path='/.well-known/acme-challenge/fake_validation',
+                                        validation='fake_validation')
+
+        url = 'http://{}:80{}'.format(challenge.hostname, challenge.path)
+
+        test_cases = [
+            {
+                'name': 'OK',
+                'expected_result': ACMEChallengeValidation.VALID,
+                'mocker_kwargs': {
+                    'text': challenge.validation,
+                },
+            },
+            {
+                'name': 'Invalid challenge content',
+                'expected_result': ACMEChallengeValidation.INVALID,
+                'mocker_kwargs': {
+                    'text': "I don't know how to solve the challenge",
+                },
+            },
+            {
+                'name': 'challenge file not found (404)',
+                'expected_result': ACMEChallengeValidation.INVALID,
+                'mocker_kwargs': {
+                    'text': "Not found",
+                    'status_code': 404,
+                },
+            },
+        ]
+
+        for test_case in test_cases:
+            with requests_mock.Mocker() as req_mock:
+                req_mock.get(url, **test_case['mocker_kwargs'])
+                result = challenge.validate()
+                self.assertEqual(result, test_case['expected_result'], test_case['name'])
+
+    @mock.patch.object(dns.resolver.Resolver, 'query')
+    def test_validate_dns(self, query_mock):
+        challenge = DNS01ACMEChallenge(validation_domain_name='_acme-challenge.tests.wmflab.org',
+                                       validation="fake_validation")
+
+        rrset_mock = mock.MagicMock()
+        rrset_mock.to_text.return_value = challenge.validation
+        answer_mock = mock.MagicMock()
+        answer_mock.rrset = [rrset_mock]
+        query_mock.return_value = answer_mock
+        result = challenge.validate()
+        query_mock.assert_called_once_with(challenge.validation_domain_name, rdtype='TXT')
+        self.assertEqual(result, ACMEChallengeValidation.VALID)
+
+        rrset_mock.to_text.return_value = 'foo'
+        query_mock.reset_mock()
+        result = challenge.validate()
+        query_mock.assert_called_once_with(challenge.validation_domain_name, rdtype='TXT')
+        self.assertEqual(result, ACMEChallengeValidation.INVALID)
+
+    @mock.patch.object(dns.resolver.Resolver, 'query')
+    def test_validate_dns_errors(self, query_mock):
+        challenge = DNS01ACMEChallenge(validation_domain_name='_acme-challenge.tests.wmflabs.org',
+                                       validation='foobar')
+        test_cases = [
+            {
+                'name': 'NXDOMAIN',
+                'side_effect': dns.resolver.NXDOMAIN,
+                'result': ACMEChallengeValidation.INVALID,
+            },
+            {
+                'name': 'YXDOMAIN',
+                'side_effect': dns.resolver.YXDOMAIN,
+                'result': ACMEChallengeValidation.INVALID,
+            },
+            {
+                'name': 'No anwser',
+                'side_effect': dns.resolver.NoAnswer,
+                'result': ACMEChallengeValidation.INVALID,
+            },
+            {
+                'name': 'Timeout',
+                'side_effect': dns.exception.Timeout,
+                'result': ACMEChallengeValidation.UNKNOWN,
+            },
+            {
+                'name': 'No Nameservers',
+                'side_effect': dns.resolver.NoNameservers,
+                'result': ACMEChallengeValidation.UNKNOWN,
+            },
+        ]
+
+        for test_case in test_cases:
+            query_mock.reset()
+            query_mock.side_effect = test_case['side_effect']
+            result = challenge.validate()
+            self.assertEqual(result, test_case['result'], test_case['name'])
 
 
 class ACMEIntegrationTests(BasePebbleIntegrationTest):

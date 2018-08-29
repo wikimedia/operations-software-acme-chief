@@ -241,6 +241,13 @@ class ACMERequests:
         if not self._account_is_valid():
             raise ACMEError('ACME account marked as not valid')
 
+    def _clean(self, csr_id):
+        if csr_id in self.orders:
+            del self.orders[csr_id]
+
+        if csr_id in self.challenges:
+            del self.challenges[csr_id]
+
     def _account_is_valid(self):
         try:
             regr = self.acme_client.update_registration(self.acme_account.regr)
@@ -341,6 +348,7 @@ class ACMERequests:
             # TimeoutError is raised if the challenges have not been validated yet
             return
         except errors.ValidationError:
+            self._clean(csr_id)
             raise ACMEInvalidChallengeError('Unable to get certificate')
         except errors.Error as finalize_error:
             raise ACMEError('Unable to get certificate') from finalize_error
@@ -350,8 +358,7 @@ class ACMERequests:
         except X509Error as certificate_error:
             raise ACMEError('Received invalid PEM from ACME server') from certificate_error
 
-        del self.orders[csr_id]
-        del self.challenges[csr_id]
+        self._clean(csr_id)
         return certificate
 
     def revoke_certificate(self, certificate, reason=CertificateRevokeReason.UNSPECIFIED):

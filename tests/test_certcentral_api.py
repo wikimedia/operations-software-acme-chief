@@ -4,9 +4,9 @@ import unittest
 
 import yaml
 
-from certcentral import KEY_TYPES, CertCentral, CertCentralConfig
-from certcentral_api import create_app
-from x509 import secure_opener
+from certcentral.certcentral import KEY_TYPES, CertCentral, CertCentralConfig
+from certcentral.certcentral_api import create_app
+from certcentral.x509 import secure_opener
 
 FILE_CONTENT = b'we do not care about the content'
 FILE_MD5 = '781646e7499e9219059ef9a1e7453f9c'

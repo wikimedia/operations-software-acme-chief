@@ -9,12 +9,13 @@ import requests_mock
 from cryptography import x509 as crypto_x509
 from cryptography.x509.oid import ExtensionOID, NameOID
 
-from acme_requests import (ACMEAccount, ACMEAccountFiles, ACMEChallengeType,
-                           ACMEChallengeValidation, ACMERequests,
-                           DNS01ACMEChallenge, HTTP01ACMEChallenge)
-from test_pebble import BasePebbleIntegrationTest
-from x509 import (CertificateSigningRequest, ECPrivateKey, RSAPrivateKey,
-                  SelfSignedCertificate)
+from certcentral.acme_requests import (ACMEAccount, ACMEAccountFiles,
+                                       ACMEChallengeType,
+                                       ACMEChallengeValidation, ACMERequests,
+                                       DNS01ACMEChallenge, HTTP01ACMEChallenge)
+from certcentral.x509 import (CertificateSigningRequest, ECPrivateKey,
+                              RSAPrivateKey)
+from tests.test_pebble import BasePebbleIntegrationTest
 
 DIRECTORY_URL = 'https://127.0.0.1:14000/dir'
 
@@ -146,7 +147,7 @@ class ACMEChallengeTest(unittest.TestCase):
 class ACMEIntegrationTests(BasePebbleIntegrationTest):
     def test_account_persistence(self):
         with tempfile.TemporaryDirectory() as base_path:
-            with mock.patch('acme_requests.TLS_VERIFY', False):
+            with mock.patch('certcentral.acme_requests.TLS_VERIFY', False):
                 account = ACMEAccount.create('test-persistence@wikimedia.org',
                                              base_path=base_path,
                                              directory_url=DIRECTORY_URL)
@@ -157,14 +158,14 @@ class ACMEIntegrationTests(BasePebbleIntegrationTest):
                 file_path = os.path.join(base_path, account_id, account_file.value)
                 self.assertTrue(os.path.isfile(file_path))
 
-            with mock.patch('acme_requests.TLS_VERIFY', False):
+            with mock.patch('certcentral.acme_requests.TLS_VERIFY', False):
                 load_account = ACMEAccount.load(account_id, base_path=base_path, directory_url=DIRECTORY_URL)
                 self.assertIsInstance(load_account, ACMEAccount)
                 self.assertIsInstance(ACMERequests(load_account), ACMERequests)
 
     def test_full_workflow_dns_challenge(self):
         """Expects pebble to be invoked with PEBBLE_VA_ALWAYS_VALID=1"""
-        with mock.patch('acme_requests.TLS_VERIFY', False):
+        with mock.patch('certcentral.acme_requests.TLS_VERIFY', False):
             account = ACMEAccount.create('tests-dns@wikimedia.org', directory_url=DIRECTORY_URL)
             session = ACMERequests(account)
         self.assertIsNotNone(account.regr)
@@ -204,7 +205,7 @@ class ACMEIntegrationTests(BasePebbleIntegrationTest):
 
     def test_full_workflow_http_challenge(self):
         """Expects pebble to be invoked with PEBBLE_VA_ALWAYS_VALID=1"""
-        with mock.patch('acme_requests.TLS_VERIFY', False):
+        with mock.patch('certcentral.acme_requests.TLS_VERIFY', False):
             account = ACMEAccount.create('tests-http@wikimedia.org', directory_url=DIRECTORY_URL)
             session = ACMERequests(account)
         self.assertIsNotNone(account.regr)
@@ -237,7 +238,7 @@ class ACMEIntegrationTests(BasePebbleIntegrationTest):
 
     def test_full_workflow_ec_certificate(self):
         """Expects pebble to be invoked with PEBBLE_VA_ALWAYS_VALID=1"""
-        with mock.patch('acme_requests.TLS_VERIFY', False):
+        with mock.patch('certcentral.acme_requests.TLS_VERIFY', False):
             account = ACMEAccount.create('tests-ec@wikimedia.org', directory_url=DIRECTORY_URL)
             session = ACMERequests(account)
         self.assertIsNotNone(account.regr)

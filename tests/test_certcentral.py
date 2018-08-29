@@ -9,16 +9,18 @@ from datetime import datetime, timedelta
 import mock
 from cryptography.hazmat.primitives.asymmetric import ec
 
-from acme_requests import (ACMEAccount, ACMEChallengeType,
-                           ACMEChallengeValidation, ACMEError,
-                           DNS01ACMEChallenge)
-from certcentral import (DNS_ZONE_UPDATE_CMD, DNS_ZONE_UPDATE_CMD_TIMEOUT,
-                         KEY_TYPES, CertCentral, CertCentralConfig,
-                         CertificateStatus)
-from test_pebble import (BaseDNSRequestHandler, BasePebbleIntegrationTest,
-                         HTTP01ChallengeHandler)
-from x509 import (Certificate, CertificateSaveMode, ECPrivateKey,
-                  PrivateKeyLoader, X509Error)
+from certcentral.acme_requests import (ACMEAccount, ACMEChallengeType,
+                                       ACMEChallengeValidation, ACMEError,
+                                       DNS01ACMEChallenge)
+from certcentral.certcentral import (DNS_ZONE_UPDATE_CMD,
+                                     DNS_ZONE_UPDATE_CMD_TIMEOUT, KEY_TYPES,
+                                     CertCentral, CertCentralConfig,
+                                     CertificateStatus)
+from certcentral.x509 import (Certificate, CertificateSaveMode, ECPrivateKey,
+                              PrivateKeyLoader, X509Error)
+from tests.test_pebble import (BaseDNSRequestHandler,
+                               BasePebbleIntegrationTest,
+                               HTTP01ChallengeHandler)
 
 DIRECTORY_URL = 'https://127.0.0.1:14000/dir'
 
@@ -130,7 +132,7 @@ class CertCentralTest(unittest.TestCase):
         set_cert_status_mock.assert_called_once()
         create_initial_certs_mock.assert_called_once()
 
-    @mock.patch('certcentral.SelfSignedCertificate')
+    @mock.patch('certcentral.certcentral.SelfSignedCertificate')
     def test_create_initial_tests(self, self_signed_cert_mock):
         self.instance.config = CertCentralConfig(
             accounts=[{'id': '1945e767ad72a532ebca519242a801bf', 'directory': 'https://127.0.0.1:14000/dir'}],
@@ -160,7 +162,7 @@ class CertCentralTest(unittest.TestCase):
         rsa_key = deepcopy(KEY_TYPES['rsa-2048'])
         rsa_key['class'] = rsa_key_mock
 
-        with mock.patch.dict('certcentral.KEY_TYPES', {'ec-prime256v1': ec_key, 'rsa-2048': rsa_key}):
+        with mock.patch.dict('certcentral.certcentral.KEY_TYPES', {'ec-prime256v1': ec_key, 'rsa-2048': rsa_key}):
             self.instance.create_initial_certs()
 
         rsa_key_mock.assert_called_once()
@@ -186,7 +188,7 @@ class CertCentralTest(unittest.TestCase):
                                                                                          kind='live'))])
 
     @mock.patch.object(ACMEAccount, 'load')
-    @mock.patch('certcentral.ACMERequests')
+    @mock.patch('certcentral.certcentral.ACMERequests')
     def test_get_acme_session(self, requests_mock, account_load_mock):
         self.instance.config = CertCentralConfig(
             accounts=[{'id': '1945e767ad72a532ebca519242a801bf', 'directory': 'https://127.0.0.1:14000/dir'}],
@@ -296,7 +298,7 @@ class CertCentralTest(unittest.TestCase):
                 'ec-prime256v1': status,
                 'rsa-2048': status,
             }}
-            with mock.patch('certcentral.sleep', side_effect=InfiniteLoopBreaker) as sleep_mock:
+            with mock.patch('certcentral.certcentral.sleep', side_effect=InfiniteLoopBreaker) as sleep_mock:
                 with mock.patch.object(self.instance, '_new_certificate') as new_certificate_mock:
                     new_certificate_mock.return_value = CertificateStatus.VALID
                     with self.assertRaises(InfiniteLoopBreaker):
@@ -313,7 +315,7 @@ class CertCentralTest(unittest.TestCase):
                 'rsa-2048': CertificateStatus.CSR_PUSHED,
             }}
 
-            with mock.patch('certcentral.sleep', side_effect=InfiniteLoopBreaker) as sleep_mock:
+            with mock.patch('certcentral.certcentral.sleep', side_effect=InfiniteLoopBreaker) as sleep_mock:
                 with mock.patch.object(self.instance, '_handle_pushed_csr') as handle_pushed_csr_mock:
                     handle_pushed_csr_mock.return_value = CertificateStatus.CHALLENGES_PUSHED
                     with self.assertRaises(InfiniteLoopBreaker):
@@ -330,7 +332,7 @@ class CertCentralTest(unittest.TestCase):
                 'rsa-2048': CertificateStatus.CHALLENGES_PUSHED,
             }}
 
-            with mock.patch('certcentral.sleep', side_effect=InfiniteLoopBreaker) as sleep_mock:
+            with mock.patch('certcentral.certcentral.sleep', side_effect=InfiniteLoopBreaker) as sleep_mock:
                 with mock.patch.object(self.instance, '_handle_pushed_challenges') as handle_pushed_challenges_mock:
                     handle_pushed_challenges_mock.return_value = CertificateStatus.VALID
                     with self.assertRaises(InfiniteLoopBreaker):
@@ -374,7 +376,8 @@ class CertCentralStatusTransitionTests(unittest.TestCase):
         rsa_key = deepcopy(KEY_TYPES['rsa-2048'])
         rsa_key['class'] = self.rsa_key_mock
 
-        self.patchers.append(mock.patch.dict('certcentral.KEY_TYPES', {'ec-prime256v1': ec_key, 'rsa-2048': rsa_key}))
+        self.patchers.append(mock.patch.dict('certcentral.certcentral.KEY_TYPES',
+                                             {'ec-prime256v1': ec_key, 'rsa-2048': rsa_key}))
         self.patchers[-1].start()
 
     def tearDown(self):
@@ -386,7 +389,7 @@ class CertCentralStatusTransitionTests(unittest.TestCase):
             for key_type_id in KEY_TYPES:
                 self.instance.cert_status[cert_id][key_type_id] = status
 
-    @mock.patch('certcentral.CertificateSigningRequest')
+    @mock.patch('certcentral.certcentral.CertificateSigningRequest')
     @mock.patch.object(CertCentral, '_get_acme_session')
     @mock.patch.object(CertCentral, '_handle_pushed_csr')
     def test_new_certificate(self, handle_pushed_csr_mock, get_acme_session_mock, csr_mock):
@@ -427,7 +430,7 @@ class CertCentralStatusTransitionTests(unittest.TestCase):
             self.assertEqual(status, CertificateStatus.SELF_SIGNED)
 
     @mock.patch.object(PrivateKeyLoader, 'load')
-    @mock.patch('certcentral.CertificateSigningRequest')
+    @mock.patch('certcentral.certcentral.CertificateSigningRequest')
     @mock.patch.object(CertCentral, '_get_acme_session')
     @mock.patch.object(CertCentral, '_handle_validated_challenges')
     def test_handle_pushed_csr(self, handle_validated_challenges_mock,
@@ -468,7 +471,7 @@ class CertCentralStatusTransitionTests(unittest.TestCase):
             self.assertEqual(status, CertificateStatus.SELF_SIGNED)
 
     @mock.patch.object(PrivateKeyLoader, 'load')
-    @mock.patch('certcentral.CertificateSigningRequest')
+    @mock.patch('certcentral.certcentral.CertificateSigningRequest')
     @mock.patch.object(CertCentral, '_get_acme_session')
     @mock.patch.object(CertCentral, '_handle_pushed_challenges')
     def test_handle_validated_challenges(self, handle_pushed_challenges_mock, get_acme_session_mock,
@@ -492,7 +495,7 @@ class CertCentralStatusTransitionTests(unittest.TestCase):
 
 
     @mock.patch.object(PrivateKeyLoader, 'load')
-    @mock.patch('certcentral.CertificateSigningRequest')
+    @mock.patch('certcentral.certcentral.CertificateSigningRequest')
     @mock.patch.object(CertCentral, '_get_acme_session')
     @mock.patch.object(CertCentral, '_handle_pushed_challenges')
     def test_handle_validated_challenges_solved_acme_error(self, handle_pushed_challenges_mock, get_acme_session_mock,
@@ -522,7 +525,7 @@ class CertCentralStatusTransitionTests(unittest.TestCase):
             self.assertEqual(status, CertificateStatus.SELF_SIGNED)
 
     @mock.patch.object(PrivateKeyLoader, 'load')
-    @mock.patch('certcentral.CertificateSigningRequest')
+    @mock.patch('certcentral.certcentral.CertificateSigningRequest')
     @mock.patch.object(CertCentral, '_get_acme_session')
     def test_handle_pushed_challenges_without_cert(self, get_acme_session_mock, csr_mock, pkey_loader_mock):
         get_acme_session_mock.return_value.get_certificate.return_value = None
@@ -537,7 +540,7 @@ class CertCentralStatusTransitionTests(unittest.TestCase):
         get_acme_session_mock.assert_has_calls(acme_session_calls)
 
     @mock.patch.object(PrivateKeyLoader, 'load')
-    @mock.patch('certcentral.CertificateSigningRequest')
+    @mock.patch('certcentral.certcentral.CertificateSigningRequest')
     @mock.patch.object(CertCentral, '_get_acme_session')
     @mock.patch.object(CertCentral, '_push_live_certificate')
     def test_handle_pushed_challenges(self, push_live_mock, get_acme_session_mock, csr_mock, pkey_loader_mock):
@@ -651,9 +654,9 @@ class CertCentralIntegrationTest(BasePebbleIntegrationTest):
         proxy_url = 'http://{}:{}'.format(proxy_host, proxy_port)
         dns_host, dns_port = self.dns_server.server_address
         self.patchers = [
-            mock.patch.dict('acme_requests.HTTP_VALIDATOR_PROXIES', {'http': proxy_url}),
-            mock.patch('acme_requests.DNS_SERVERS', [dns_host]),
-            mock.patch('acme_requests.DNS_PORT', dns_port),
+            mock.patch.dict('certcentral.acme_requests.HTTP_VALIDATOR_PROXIES', {'http': proxy_url}),
+            mock.patch('certcentral.acme_requests.DNS_SERVERS', [dns_host]),
+            mock.patch('certcentral.acme_requests.DNS_PORT', dns_port),
         ]
         for patcher in self.patchers:
             patcher.start()
@@ -664,7 +667,7 @@ class CertCentralIntegrationTest(BasePebbleIntegrationTest):
             patcher.stop()
 
 
-    @mock.patch('acme_requests.TLS_VERIFY', False)
+    @mock.patch('certcentral.acme_requests.TLS_VERIFY', False)
     @mock.patch('signal.signal')
     @mock.patch.object(CertCentral, 'sighup_handler')
     def test_issue_new_certificate_http01(self, a, b):
@@ -711,7 +714,7 @@ class CertCentralIntegrationTest(BasePebbleIntegrationTest):
                 cert = Certificate.load(cert_central._get_path(cert_id, key_type_id, public=True, kind='live'))
                 self.assertFalse(cert.self_signed)
 
-    @mock.patch('acme_requests.TLS_VERIFY', False)
+    @mock.patch('certcentral.acme_requests.TLS_VERIFY', False)
     @mock.patch('signal.signal')
     @mock.patch.object(CertCentral, 'sighup_handler')
     def test_issue_new_certificate_dns01(self, a, b):
@@ -758,7 +761,7 @@ class CertCentralIntegrationTest(BasePebbleIntegrationTest):
                 cert = Certificate.load(cert_central._get_path(cert_id, key_type_id, public=True, kind='live'))
                 self.assertFalse(cert.self_signed)
 
-    @mock.patch('acme_requests.TLS_VERIFY', False)
+    @mock.patch('certcentral.acme_requests.TLS_VERIFY', False)
     @mock.patch('signal.signal')
     @mock.patch.object(CertCentral, 'sighup_handler')
     def test_issue_new_certificate_force_validation_failure(self, a, b):
@@ -821,10 +824,10 @@ class CertCentralIntegrationTest(BasePebbleIntegrationTest):
                 cert = Certificate.load(cert_central._get_path(cert_id, key_type_id, public=True, kind='live'))
                 self.assertFalse(cert.self_signed)
 
-    @mock.patch('acme_requests.TLS_VERIFY', False)
+    @mock.patch('certcentral.acme_requests.TLS_VERIFY', False)
     @mock.patch('signal.signal')
     @mock.patch.object(CertCentral, 'sighup_handler')
-    @mock.patch('certcentral.sleep', side_effect=InfiniteLoopBreaker)
+    @mock.patch('certcentral.certcentral.sleep', side_effect=InfiniteLoopBreaker)
     def test_certificate_management(self, a, b, c):
         # Step 1 - create an ACME account
         account = ACMEAccount.create('tests-certcentral@wikimedia.org',

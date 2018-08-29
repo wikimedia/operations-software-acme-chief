@@ -11,8 +11,8 @@ import stat
 import flask
 import yaml
 
-from certcentral import BASEPATH, KEY_TYPES, CertCentral, CertCentralConfig
-
+from certcentral.certcentral import (BASEPATH, KEY_TYPES, CertCentral,
+                                     CertCentralConfig)
 
 REQUIRED_METADATA_PARAMETERS = {
     'checksum_type': 'md5',

@@ -19,6 +19,7 @@
 This module is the main source code behind Wikimedia's central certificates service.
 A description of it can be found at https://phabricator.wikimedia.org/T194962
 """
+import argparse
 import collections
 import datetime
 import logging
@@ -32,13 +33,14 @@ from time import sleep
 import yaml
 from cryptography.hazmat.primitives.asymmetric import ec
 
-from acme_requests import (ACMEAccount, ACMEChallengeType,
-                           ACMEChallengeValidation, ACMEError,
-                           ACMEInvalidChallengeError, ACMEOrderNotFound,
-                           ACMERequests)
-from x509 import (Certificate, CertificateSaveMode, CertificateSigningRequest,
-                  ECPrivateKey, PrivateKeyLoader, RSAPrivateKey,
-                  SelfSignedCertificate, X509Error)
+from certcentral.acme_requests import (ACMEAccount, ACMEChallengeType,
+                                       ACMEChallengeValidation, ACMEError,
+                                       ACMEInvalidChallengeError,
+                                       ACMEOrderNotFound, ACMERequests)
+from certcentral.x509 import (Certificate, CertificateSaveMode,
+                              CertificateSigningRequest, ECPrivateKey,
+                              PrivateKeyLoader, RSAPrivateKey,
+                              SelfSignedCertificate, X509Error)
 
 logger = logging.getLogger(__name__)  # pylint: disable=invalid-name
 
@@ -524,5 +526,18 @@ class CertCentral():
             sleep(5)
 
 
-if __name__ == '__main__':
+def main():
+    """
+    Main backend entry point.
+    """
+    parser = argparse.ArgumentParser(description="""Runs the CertCentral backend. This is
+    responsible for maintaining your configured certificates - creating dummy self-signed
+    ones to start with, then having them replaced with ones from your ACME server. This does
+    not provide the CertCentral API.""")
+    parser.add_argument('--version', action='version', version='0.1')
+    parser.parse_args()
     CertCentral().run()
+
+
+if __name__ == '__main__':
+    main()

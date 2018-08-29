@@ -21,9 +21,9 @@ import requests
 from acme import client, errors, messages
 
 # TODO: move secure_opener out of x509
-from x509 import (Certificate, CertificateRevokeReason,
-                  CertificateSigningRequest, PrivateKeyLoader, RSAPrivateKey,
-                  X509Error, secure_opener)
+from certcentral.x509 import (Certificate, CertificateRevokeReason,
+                              CertificateSigningRequest, PrivateKeyLoader,
+                              RSAPrivateKey, X509Error, secure_opener)
 
 BASEPATH = '/etc/certcentral/accounts'
 DIRECTORY_URL = 'https://acme-v02.api.letsencrypt.org/directory'

@@ -11,10 +11,11 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec, rsa
 from cryptography.x509.oid import ExtensionOID, NameOID
 
-from x509 import (DEFAULT_EC_CURVE, DEFAULT_RSA_KEY_SIZE, OPENER_MODE,
-                  Certificate, CertificateSaveMode, CertificateSigningRequest,
-                  ECPrivateKey, PrivateKey, PrivateKeyLoader, RSAPrivateKey,
-                  SelfSignedCertificate, X509Error, secure_opener)
+from certcentral.x509 import (DEFAULT_EC_CURVE, DEFAULT_RSA_KEY_SIZE,
+                              OPENER_MODE, Certificate, CertificateSaveMode,
+                              CertificateSigningRequest, ECPrivateKey,
+                              PrivateKey, PrivateKeyLoader, RSAPrivateKey,
+                              SelfSignedCertificate, X509Error, secure_opener)
 
 RSA_TEST_KEY = '''
 -----BEGIN RSA PRIVATE KEY-----
@@ -293,7 +294,7 @@ class CertificateTest(unittest.TestCase):
         self.assertFalse(cert.needs_renew())
         self.assertTrue(cert.self_signed)
         mocked_now = until_date - datetime.timedelta(days=10)
-        with mock.patch('x509.datetime') as mocked_datetime:
+        with mock.patch('certcentral.x509.datetime') as mocked_datetime:
             mocked_datetime.utcnow = mock.Mock(return_value=mocked_now)
             self.assertTrue(cert.needs_renew())
 

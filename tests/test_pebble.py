@@ -15,7 +15,7 @@ from urllib.parse import urlparse, urlunparse
 import dnslib
 import requests
 
-from x509 import RSAPrivateKey, SelfSignedCertificate
+from certcentral.x509 import RSAPrivateKey, SelfSignedCertificate
 
 PEBBLE_CMD_FLAGS = ['-strict=false']
 PEBBLE_ENV_VARS = {

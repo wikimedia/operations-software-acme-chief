@@ -52,7 +52,7 @@ def create_app(base_path=BASEPATH, cert_central_config=None):
     if cert_central_config is None:
         config_path = os.path.join(base_path, CertCentral.config_path)
         confd_path = os.path.join(base_path, CertCentral.confd_path)
-        CertCentralConfig.load(config_path, confd_path=confd_path)
+        cert_central_config = CertCentralConfig.load(config_path, confd_path=confd_path)
 
     app = flask.Flask(__name__)
 
@@ -111,7 +111,8 @@ def create_app(base_path=BASEPATH, cert_central_config=None):
         try:
             with open(fpath, 'rb') as requested_f:
                 file_contents = requested_f.read()
-        except OSError:
+        except OSError as ose:
+            app.logger.info(ose)
             abort(503, 'unable to fulfill request')
 
         if api != 'metadata':

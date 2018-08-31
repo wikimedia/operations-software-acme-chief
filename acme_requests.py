@@ -6,6 +6,7 @@ Wikimedia Foundation 2018
 """
 import abc
 import hashlib
+import logging
 import os
 from collections import defaultdict
 from datetime import datetime, timedelta
@@ -35,6 +36,8 @@ HTTP_VALIDATOR_PROXIES = {
 }
 DEFAULT_DNS01_VALIDATION_TIMEOUT = 2.0
 DEFAULT_HTTP01_VALIDATION_TIMEOUT = 2.0
+
+logger = logging.getLogger(__name__)  # pylint: disable=invalid-name
 
 
 class ACMEError(Exception):
@@ -83,6 +86,9 @@ class BaseACMEChallenge(abc.ABC):
     def validate(self, **kwargs):
         """Checks if the challenge has been fulfilled or not. Returns a member of ACMEChallengeValidation"""
 
+    def __str__(self):
+        return "Challenge type: {}".format(self.challenge_type)
+
 
 class DNS01ACMEChallenge(BaseACMEChallenge):
     """Class representing dns-01 challenge"""
@@ -92,6 +98,7 @@ class DNS01ACMEChallenge(BaseACMEChallenge):
         self.file_name = "{}-{}".format(validation_domain_name, validation)
 
     def validate(self, **kwargs):
+        logger.debug("Attempting to validate challenge %s", self)
         resolver = dns.resolver.Resolver()
         resolver.port = DNS_PORT
         if DNS_SERVERS is not None:
@@ -113,6 +120,9 @@ class DNS01ACMEChallenge(BaseACMEChallenge):
 
         return ACMEChallengeValidation.INVALID
 
+    def __str__(self):
+        return '{}. {} TXT {}'.format(super().__str__(), self.validation_domain_name, self.validation)
+
 
 class HTTP01ACMEChallenge(BaseACMEChallenge):
     """Class representing http-01 challenge"""
@@ -123,6 +133,7 @@ class HTTP01ACMEChallenge(BaseACMEChallenge):
         self.file_name = path.split('/')[-1]
 
     def validate(self, **kwargs):
+        logger.debug("Attempting to validate challenge %s", self)
         timeout = kwargs.get('timeout', DEFAULT_HTTP01_VALIDATION_TIMEOUT)
         server = kwargs.get('server', self.hostname)
         port = kwargs.get('port', 80)
@@ -147,6 +158,9 @@ class HTTP01ACMEChallenge(BaseACMEChallenge):
             return ACMEChallengeValidation.VALID
 
         return ACMEChallengeValidation.INVALID
+
+    def __str__(self):
+        return '{}. http://{}{}: {}'.format(super().__str__(), self.hostname, self.path, self.validation)
 
 
 class ACMEAccount:
@@ -211,6 +225,7 @@ class ACMEAccount:
     @classmethod
     def load(cls, account_id, base_path=BASEPATH, directory_url=DIRECTORY_URL):
         """Load the account with the specified account_id from disk"""
+        logger.debug("Loading ACME account %s from directory: %s", account_id, directory_url)
         paths = ACMEAccount._get_paths(account_id, base_path=base_path)
 
         key = PrivateKeyLoader.load(paths[ACMEAccountFiles.KEY])

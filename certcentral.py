@@ -21,6 +21,8 @@ A description of it can be found at https://phabricator.wikimedia.org/T194962
 """
 import collections
 import datetime
+import logging
+import logging.config
 import os
 import signal
 import subprocess
@@ -38,6 +40,8 @@ from x509 import (Certificate, CertificateSaveMode, CertificateSigningRequest,
                   ECPrivateKey, PrivateKeyLoader, RSAPrivateKey,
                   SelfSignedCertificate, X509Error)
 
+logger = logging.getLogger(__name__)  # pylint: disable=invalid-name
+
 BASEPATH = '/etc/certcentral'
 KEY_TYPES = {
     'ec-prime256v1': {
@@ -51,6 +55,27 @@ KEY_TYPES = {
         'params': {
             'size': 2048,
         }
+    }
+}
+
+LOGGING_CONFIG = {
+    'disable_existing_loggers': False,
+    'version': 1,
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',  # logging handler that outputs log messages to terminal
+            'level': 'INFO',                   # message level to be written to console
+        },
+    },
+    'loggers': {
+        'certcentral': {
+            'handlers': ['console'],
+            'level': 'INFO',
+        },
+        'acme_requests': {
+            'handlers': ['console'],
+            'level': 'INFO',
+        },
     }
 }
 
@@ -103,6 +128,7 @@ class CertCentralConfig:
     @staticmethod
     def load(file_name, confd_path=None):
         """Load a config from the specified file_name and an optional conf.d path"""
+        logger.debug("Loading config file: %s", file_name)
         if confd_path is None:
             confd_path = os.path.dirname(file_name)
 
@@ -113,10 +139,13 @@ class CertCentralConfig:
 
         authorized_hosts = collections.defaultdict(list)
         for fname in os.listdir(confd_path):
-            with open(os.path.join(confd_path, fname)) as conf_f:
+            file_path = os.path.join(confd_path, fname)
+            logger.debug("Loading config file: %s", file_path)
+            with open(file_path) as conf_f:
                 conf_data = yaml.safe_load(conf_f)
                 if conf_data['certname'] not in config['certificates']:
-                    # TODO: log a warning
+                    logger.warning("Certificate %s referenced on %s not found in general config",
+                                   conf_data['certname'], file_path)
                     continue
                 authorized_hosts[conf_data['certname']].append(conf_data['hostname'])
 
@@ -149,6 +178,7 @@ class CertCentral():
     dns_challenges_path = 'dns_challenges'
 
     def __init__(self, base_path=BASEPATH):
+        self._configure_logging()
         self.live_certs_path = os.path.join(base_path, CertCentral.live_certs_path)
         self.new_certs_path = os.path.join(base_path, CertCentral.new_certs_path)
         self.accounts_path = os.path.join(base_path, CertCentral.accounts_path)
@@ -164,6 +194,11 @@ class CertCentral():
         self.cert_status = collections.defaultdict(dict)
         signal.signal(signal.SIGHUP, self.sighup_handler)
         self.sighup_handler()
+
+    @staticmethod
+    def _configure_logging():
+        """Configure logging"""
+        logging.config.dictConfig(LOGGING_CONFIG)
 
     def _get_path(self, cert_id, key_type_id, public=True, kind='live', cert_type='cert_only'):
         if public:
@@ -184,12 +219,12 @@ class CertCentral():
         """
         status = collections.defaultdict(dict)
 
-        def _get_certificate_status(certificate):
+        def _get_certificate_status(cert_id, certificate):
             if certificate.self_signed is True:
                 return CertificateStatus.SELF_SIGNED
 
             if datetime.datetime.utcnow() > certificate.certificate.not_valid_after:
-                # TODO: log a warning
+                logger.warning("Certificate %s expired on %s", cert_id, certificate.certificate.not_valid_after)
                 return CertificateStatus.EXPIRED
 
             if certificate.needs_renew():
@@ -209,7 +244,7 @@ class CertCentral():
 
                 try:
                     certificate = Certificate.load(self._get_path(cert_id, key_type_id, public=True, kind='live'))
-                    status[cert_id][key_type_id] = _get_certificate_status(certificate)
+                    status[cert_id][key_type_id] = _get_certificate_status(cert_id, certificate)
                 except (OSError, X509Error):
                     status[cert_id][key_type_id] = CertificateStatus.INITIAL
 
@@ -227,6 +262,7 @@ class CertCentral():
         authorized hosts data.
         It is also called once at the beginning to perform initial setup.
         """
+        logger.info("SIGHUP received")
         self.config = CertCentralConfig.load(file_name=self.config_path, confd_path=self.confd_path)
         self.cert_status = self._set_cert_status()
         self.create_initial_certs()
@@ -243,6 +279,7 @@ class CertCentral():
                 if self.cert_status[cert_id][key_type_id] != CertificateStatus.INITIAL:
                     continue
 
+                logger.info("Creating initial self-signed certificate for %s / %s", cert_id, key_type_id)
                 key = key_type_details['class']()
                 key.generate(**key_type_details['params'])
                 key.save(self._get_path(cert_id, key_type_id, public=False, kind='live'))
@@ -263,6 +300,7 @@ class CertCentral():
             for account in self.config.accounts:  # TODO: avoid O(n) on retrieving account details
                 if account['id'] == acme_account_id:
                     directory_url = account['directory']
+                    logger.debug("Creating a new ACME Requests session for account %s", acme_account_id)
                     self.acme_sessions[acme_account_id] = ACMERequests(ACMEAccount.load(acme_account_id,
                                                                                         base_path=self.accounts_path,
                                                                                         directory_url=directory_url))
@@ -271,6 +309,7 @@ class CertCentral():
     @staticmethod
     def _trigger_dns_zone_update(challenges):
         """Triggers a DNS zone update. returns True if everything goes as expected. False otherwise"""
+        logger.info("Triggering DNS zone update...")
         params = []
         for challenge in challenges:
             params.append(challenge.validation_domain_name)
@@ -282,12 +321,10 @@ class CertCentral():
                                   stderr=subprocess.DEVNULL,
                                   timeout=DNS_ZONE_UPDATE_CMD_TIMEOUT)
         except subprocess.CalledProcessError as cpe:
-            # TODO: log an error
-            print("Unexpected return code: {}".format(cpe.returncode))
+            logger.error("Unexpected return code spawning DNS zone updater: %d", cpe.returncode)
             return False
         except subprocess.TimeoutExpired:
-            # TODO: log an error
-            print("Unable to update DNS zone in {} seconds".format(DNS_ZONE_UPDATE_CMD_TIMEOUT))
+            logger.error("Unable to update DNS zone in %d seconds", DNS_ZONE_UPDATE_CMD_TIMEOUT)
             return False
 
         return True
@@ -298,6 +335,7 @@ class CertCentral():
             - Generates and persists a CSR signed by the previously generated key
             - Passes the ball to the next status handler
         """
+        logger.info("Handling new certificate event for %s / %s", cert_id, key_type_id)
         cert_details = self.config.certificates[cert_id]
         key_type_details = KEY_TYPES[key_type_id]
         private_key = key_type_details['class']()
@@ -316,7 +354,8 @@ class CertCentral():
         challenges = session.push_csr(csr)
         challenge_type = CHALLENGE_TYPES[cert_details['challenge']]
         if challenge_type not in challenges:
-            # TODO: log a warning
+            logger.warning("Unable to get required challenge type %s for certificate %s / %s",
+                           challenge_type, cert_id, key_type_id)
             return CertificateStatus.SELF_SIGNED
         try:
             for challenge in challenges[challenge_type]:
@@ -339,6 +378,7 @@ class CertCentral():
             - Checks that challenges have been validated
             - Passes the ball to the next status handle
         """
+        logger.info("Handling pushed CSR event for %s / %s", cert_id, key_type_id)
         try:
             private_key = PrivateKeyLoader.load(self._get_path(cert_id, key_type_id, public=False, kind='new'))
         except (OSError, X509Error):
@@ -364,7 +404,7 @@ class CertCentral():
         for challenge in challenges:
             if challenge.validate() is not ACMEChallengeValidation.VALID:
                 # keep the issuance process in this step till all the challenges have been validated
-                # TODO: log a warning
+                logger.warning("Unable to validate challenge %s", challenge)
                 return CertificateStatus.CSR_PUSHED
 
         status = CertificateStatus.CHALLENGES_VALIDATED
@@ -377,6 +417,7 @@ class CertCentral():
             - pushes solved challenges to the ACME directory
             - Passes the ball to the next status handler
         """
+        logger.info("Handling validated challenges event for %s / %s", cert_id, key_type_id)
         try:
             private_key = PrivateKeyLoader.load(self._get_path(cert_id, key_type_id, public=False, kind='new'))
         except (OSError, X509Error):
@@ -409,6 +450,7 @@ class CertCentral():
             - Attempts to fetch the signed certificate from the ACME directory
             - Persists the certificate on disk
         """
+        logger.info("Handling pushed challenges event for %s / %s", cert_id, key_type_id)
         try:
             private_key = PrivateKeyLoader.load(self._get_path(cert_id, key_type_id, public=False, kind='new'))
         except (OSError, X509Error):
@@ -439,6 +481,7 @@ class CertCentral():
 
     def _push_live_certificate(self, cert_id, key_type_id):
         """Moves a new certificate to the live path after checking that everything looks sane"""
+        logger.info("Pushing the new certificate for %s / %s", cert_id, key_type_id)
         try:
             private_key = PrivateKeyLoader.load(self._get_path(cert_id, key_type_id, public=False, kind='new'))
             cert = Certificate.load(self._get_path(cert_id, key_type_id,
@@ -458,6 +501,7 @@ class CertCentral():
         It will begin attempting to request real certificates from the certificate authority.
         In future it will attempt to renew existing certificates.
         """
+        logger.info("Starting main loop...")
         while True:
             for cert_id in self.cert_status:
                 for key_type_id in KEY_TYPES:
@@ -473,7 +517,7 @@ class CertCentral():
                     elif cert_status is CertificateStatus.CHALLENGES_PUSHED:
                         new_status = self._handle_pushed_challenges(cert_id, key_type_id)
                     else:
-                        print("Unexpected state: {}".format(cert_status))
+                        logger.error("Unexpected state: %s", cert_status)
                         continue
 
                     self.cert_status[cert_id][key_type_id] = new_status

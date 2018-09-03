@@ -5,7 +5,7 @@ import unittest
 import yaml
 
 from certcentral.certcentral import KEY_TYPES, CertCentral, CertCentralConfig
-from certcentral.certcentral_api import create_app
+from certcentral.api import create_app
 from certcentral.x509 import secure_opener
 
 FILE_CONTENT = b'we do not care about the content'

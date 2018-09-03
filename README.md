@@ -8,7 +8,7 @@ CA. It can support http-01 and dns-01 challenges.
 Certcentral itself consists of two parts:
 * The backend in certcentral.py, which is responsible for generating initial certificates and then
   replacing them with live ones from the specified ACME server.
-* The API in certcentral_api.py/uwsgi.py, which is responsible for taking requests from users,
+* The API in api.py/uwsgi.py, which is responsible for taking requests from users,
   and distributing the certificates saved by the backend.
 
 It is intended for use in multi-server environments where any one of several actual servers with no

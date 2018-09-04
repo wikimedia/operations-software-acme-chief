@@ -102,7 +102,7 @@ class BaseDNSRequestHandler(socketserver.BaseRequestHandler):
     challenges_path = '/tmp'
 
     def get_data(self):
-        return self.request[0].strip()
+        return self.request[0]
 
     def send_data(self, data):
         return self.request[1].sendto(data, self.client_address)
@@ -135,8 +135,8 @@ class BaseDNSRequestHandler(socketserver.BaseRequestHandler):
             for answer in answers:
                 reply.add_answer(answer)
             self.send_data(reply.pack())
-        except Exception:
-            pass
+        except Exception as e:
+            print(e)
 
 
 class BasePebbleIntegrationTest(unittest.TestCase):

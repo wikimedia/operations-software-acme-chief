@@ -20,3 +20,24 @@ It is hoped that eventually this will be used to handle certificates for wikiped
 
 The license in use is GPL v3+ and the main developers are Alex Monk <krenair@gmail.com> and Valentin
 Gutierrez <vgutierrez@wikimedia.org>.
+
+## Configuration file example
+Certcentral expects its configuration file in /etc/certcentral/config.yaml by default
+```yaml
+accounts:
+-
+    id: account_id_here
+    directory: "https://acme-v02.api.letsencrypt.org/directory"
+certificates:
+    testing:
+        CN: certcentraltest.beta.wmflabs.org
+        SNI:
+        - certcentraltest.beta.wmflabs.org
+        challenge: http-01
+```
+
+It also supports per-certificate configuration in /etc/certcentral/conf.d. conf.d file example:
+```yaml
+certname: default_account_certificate
+hostname: deployment-certcentral-testclient02.deployment-prep.eqiad.wmflabs
+```

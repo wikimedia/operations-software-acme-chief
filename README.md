@@ -34,6 +34,12 @@ certificates:
         SNI:
         - certcentraltest.beta.wmflabs.org
         challenge: http-01
+challenges:
+    dns-01:
+        validation_dns_servers:
+        - 127.0.0.1
+        sync_dns_servers:
+        - 127.0.0.1
 ```
 
 It also supports per-certificate configuration in /etc/certcentral/conf.d. conf.d file example:

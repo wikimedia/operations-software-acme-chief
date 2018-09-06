@@ -40,6 +40,12 @@ class CertCentralApiTest(unittest.TestCase):
             default_account=None,
             authorized_hosts={
                 'test_certificate': ['localhost']
+            },
+            challenges={
+                'dns-01': {
+                    'validation_dns_servers': ['127.0.0.1'],
+                    'sync_dns_servers': ['127.0.0.1'],
+                }
             }
         )
         self._populate_files()

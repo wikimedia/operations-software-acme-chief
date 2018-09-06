@@ -101,8 +101,9 @@ class DNS01ACMEChallenge(BaseACMEChallenge):
         logger.debug("Attempting to validate challenge %s", self)
         resolver = dns.resolver.Resolver()
         resolver.port = DNS_PORT
-        if DNS_SERVERS is not None:
-            resolver.nameservers = DNS_SERVERS
+        dns_servers = kwargs.get('dns_servers', DNS_SERVERS)
+        if dns_servers is not None:
+            resolver.nameservers = dns_servers
         resolver.timeout = kwargs.get('timeout', DEFAULT_DNS01_VALIDATION_TIMEOUT)
         resolver.lifetime = kwargs.get('timeout', DEFAULT_DNS01_VALIDATION_TIMEOUT)
 

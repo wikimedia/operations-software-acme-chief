@@ -121,11 +121,22 @@ class CertificateStatus(Enum):
 
 class CertCentralConfig:
     """Class representing CertCentral configuration"""
-    def __init__(self, *, accounts, certificates, default_account, authorized_hosts):
+    def __init__(self, *, accounts, certificates, default_account, authorized_hosts, challenges):
         self.accounts = accounts
         self.certificates = certificates
         self.default_account = default_account
         self.authorized_hosts = authorized_hosts
+        self.challenges = {}
+        for challenge_type, challenge_config in challenges.items():
+            if challenge_type == 'dns-01':
+                self.challenges[ACMEChallengeType.DNS01] = challenge_config
+            elif challenge_type == 'http-01':
+                self.challenges[ACMEChallengeType.HTTP01] = challenge_config
+            else:
+                logger.warning("Unexpected challenge type found in configuration: %s", challenge_type)
+
+        if ACMEChallengeType.DNS01 not in self.challenges:
+            logger.warning('Missing dns-01 challenge configuration')
 
     @staticmethod
     def load(file_name, confd_path=None):
@@ -154,7 +165,8 @@ class CertCentralConfig:
         return CertCentralConfig(accounts=config['accounts'],
                                  certificates=config['certificates'],
                                  default_account=default_account,
-                                 authorized_hosts=authorized_hosts)
+                                 authorized_hosts=authorized_hosts,
+                                 challenges=config['challenges'])
 
     @staticmethod
     def _get_default_account(accounts):
@@ -404,7 +416,13 @@ class CertCentral():
             return CertificateStatus.SELF_SIGNED
 
         for challenge in challenges:
-            if challenge.validate() is not ACMEChallengeValidation.VALID:
+            if challenge.challenge_type is ACMEChallengeType.DNS01:
+                validation_params = {'dns_servers':
+                                     self.config.challenges[ACMEChallengeType.DNS01]['validation_dns_servers']}
+            else:
+                validation_params = {}
+
+            if challenge.validate(**validation_params) is not ACMEChallengeValidation.VALID:
                 # keep the issuance process in this step till all the challenges have been validated
                 logger.warning("Unable to validate challenge %s", challenge)
                 return CertificateStatus.CSR_PUSHED

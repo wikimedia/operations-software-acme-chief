@@ -43,6 +43,12 @@ certificates:
     SNI:
         - '*.test.wmflabs.org'
     challenge: dns-01
+challenges:
+    dns-01:
+        validation_dns_servers:
+            - 127.0.0.1
+        sync_dns_servers:
+            - 127.0.0.1
 '''
 
 VALID_CONFIG_EXAMPLE_WITHOUT_DEFAULT_ACCOUNT = '''
@@ -63,6 +69,12 @@ certificates:
     SNI:
         - '*.test.wmflabs.org'
     challenge: dns-01
+challenges:
+    dns-01:
+        validation_dns_servers:
+            - 127.0.0.1
+        sync_dns_servers:
+            - 127.0.0.1
 '''
 
 CONFD_VALID_FILE_EXAMPLE = '''
@@ -147,6 +159,12 @@ class CertCentralTest(unittest.TestCase):
             default_account='1945e767ad72a532ebca519242a801bf',
             authorized_hosts={
                 'test_certificate': ['localhost']
+            },
+            challenges={
+                'dns-01': {
+                    'validation_dns_servers': ['127.0.0.1'],
+                    'sync_dns_servers': ['127.0.0.1'],
+                }
             }
         )
 
@@ -203,6 +221,12 @@ class CertCentralTest(unittest.TestCase):
             default_account='1945e767ad72a532ebca519242a801bf',
             authorized_hosts={
                 'test_certificate': ['localhost']
+            },
+            challenges={
+                'dns-01': {
+                    'validation_dns_servers': ['127.0.0.1'],
+                    'sync_dns_servers': ['127.0.0.1'],
+                }
             }
         )
 
@@ -288,6 +312,12 @@ class CertCentralTest(unittest.TestCase):
             default_account='1945e767ad72a532ebca519242a801bf',
             authorized_hosts={
                 'test_certificate': ['localhost']
+            },
+            challenges={
+                'dns-01': {
+                    'validation_dns_servers': ['127.0.0.1'],
+                    'sync_dns_servers': ['127.0.0.1'],
+                }
             }
         )
 
@@ -364,6 +394,12 @@ class CertCentralStatusTransitionTests(unittest.TestCase):
             default_account='1945e767ad72a532ebca519242a801bf',
             authorized_hosts={
                 'test_certificate': ['localhost']
+            },
+            challenges={
+                'dns-01': {
+                    'validation_dns_servers': ['127.0.0.1'],
+                    'sync_dns_servers': ['127.0.0.1'],
+                }
             }
         )
 
@@ -582,6 +618,12 @@ class CertCentralDetermineStatusTest(unittest.TestCase):
             default_account='1945e767ad72a532ebca519242a801bf',
             authorized_hosts={
                 'test_certificate': ['localhost']
+            },
+            challenges={
+                'dns-01': {
+                    'validation_dns_servers': ['127.0.0.1'],
+                    'sync_dns_servers': ['127.0.0.1'],
+                }
             }
         )
 
@@ -691,6 +733,12 @@ class CertCentralIntegrationTest(BasePebbleIntegrationTest):
             default_account=account.account_id,
             authorized_hosts={
                 'test_certificate': ['localhost']
+            },
+            challenges={
+                'dns-01': {
+                    'validation_dns_servers': ['127.0.0.1'],
+                    'sync_dns_servers': ['127.0.0.1'],
+                }
             }
         )
         cert_central.cert_status = {'test_certificate': {
@@ -738,6 +786,12 @@ class CertCentralIntegrationTest(BasePebbleIntegrationTest):
             default_account=account.account_id,
             authorized_hosts={
                 'test_certificate': ['localhost']
+            },
+            challenges={
+                'dns-01': {
+                    'validation_dns_servers': ['127.0.0.1'],
+                    'sync_dns_servers': ['127.0.0.1'],
+                }
             }
         )
         cert_central.cert_status = {'test_certificate': {
@@ -785,6 +839,12 @@ class CertCentralIntegrationTest(BasePebbleIntegrationTest):
             default_account=account.account_id,
             authorized_hosts={
                 'test_certificate': ['localhost']
+            },
+            challenges={
+                'dns-01': {
+                    'validation_dns_servers': ['127.0.0.1'],
+                    'sync_dns_servers': ['127.0.0.1'],
+                }
             }
         )
         cert_central.cert_status = {'test_certificate': {
@@ -849,6 +909,12 @@ class CertCentralIntegrationTest(BasePebbleIntegrationTest):
             default_account=account.account_id,
             authorized_hosts={
                 'test_certificate': ['localhost']
+            },
+            challenges={
+                'dns-01': {
+                    'validation_dns_servers': ['127.0.0.1'],
+                    'sync_dns_servers': ['127.0.0.1'],
+                }
             }
         )
         cert_central.cert_status = {'test_certificate': {

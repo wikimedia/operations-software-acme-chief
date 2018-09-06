@@ -1,0 +1,7 @@
+etc/certcentral
+etc/certcentral/conf.d
+etc/certcentral/new_certs
+etc/certcentral/live_certs
+etc/certcentral/http_challenges
+etc/certcentral/dns_challenges
+etc/certcentral/csrs

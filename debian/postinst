@@ -1,0 +1,42 @@
+#!/bin/sh
+
+set -e
+
+case "$1" in
+  configure)
+    # Add certcentral user
+    if ! getent passwd certcentral > /dev/null; then
+        adduser --quiet --system --no-create-home --home /nonexistent \
+            --group --gecos "Central certificates service" certcentral || true
+    fi
+
+    chmod 750 /etc/certcentral /etc/certcentral/live_certs /etc/certcentral/http_challenges /etc/certcentral/dns_challenges
+    chmod 700 /etc/certcentral/new_certs /etc/certcentral/csrs
+
+    if ! getent group certcentral > /dev/null; then
+        echo "Error: certcentral group does not exist" >&2
+        exit 1
+    fi
+    chown certcentral:certcentral /etc/certcentral /etc/certcentral/new_certs /etc/certcentral/live_certs /etc/certcentral/http_challenges /etc/certcentral/dns_challenges /etc/certcentral/csrs
+
+    if ! getent passwd www-data > /dev/null; then
+        echo "Error: www-data user does not exist" >&2
+        exit 1
+    fi
+
+    adduser www-data certcentral
+  ;;
+
+  abort-upgrade|abort-remove|abort-deconfigure)
+    :
+  ;;
+
+  *)
+    echo "postinst called with unknown argument \`$1'" >&2
+    exit 1
+  ;;
+esac
+
+#DEBHELPER#
+
+exit 0

@@ -1,0 +1,2 @@
+#!/usr/bin/dh-exec
+debian/config.example.yaml => etc/certcentral/config.example.yaml

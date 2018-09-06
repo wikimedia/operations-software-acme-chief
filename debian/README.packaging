@@ -1,0 +1,2 @@
+To build this package you can do something like this:
+gbp buildpackage --git-export-dir=../build-area/certcentral -b --git-ignore-new

@@ -1,0 +1,16 @@
+accounts:
+-
+    id: account_id_here
+    directory: "https://acme-v02.api.letsencrypt.org/directory"
+certificates:
+    testing:
+        CN: certcentraltest.beta.wmflabs.org
+        SNI:
+        - certcentraltest.beta.wmflabs.org
+        challenge: http-01
+challenges:
+    dns-01:
+        validation_dns_servers:
+        - 127.0.0.1
+        sync_dns_servers:
+        - 127.0.0.1

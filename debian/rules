@@ -1,0 +1,39 @@
+#!/usr/bin/make -f
+
+# The deb package will be named python3?-$PYBUILD_NAME
+export PYBUILD_NAME=certcentral
+## Uncomment these if you need to disable tests during deb build.
+## Disable tests so we don't need test dependencies at build time.
+#export PYBUILD_DISABLE_python2.7=test
+#export PYBUILD_DISABLE_python3=test
+
+%:
+	dh $@ --with python3 --buildsystem=pybuild --with systemd
+
+
+override_dh_auto_clean:
+	python3 setup.py clean -a
+	find . -name \*.pyc -exec rm {} \;
+
+
+
+override_dh_auto_build:
+	python3 setup.py build --force
+
+
+
+override_dh_auto_install:
+	python3 setup.py install --force --root=debian/certcentral --no-compile -O0 --install-layout=deb
+
+
+
+override_dh_python2:
+	dh_python2 --no-guessing-versions
+
+
+
+override_dh_installinit:
+	# We only have a systemd unit, not sysvinit.
+	# Can be removed in debhelper compat 11
+	dh_installinit -Ncertcentral
+

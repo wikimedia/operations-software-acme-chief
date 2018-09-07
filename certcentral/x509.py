@@ -24,7 +24,7 @@ DEFAULT_RSA_PUBLIC_EXPONENT = 65537
 DEFAULT_SIGNATURE_ALGORITHM = hashes.SHA256()
 DEFAULT_EC_CURVE = ec.SECP256R1  # pylint: disable=invalid-name
 DEFAULT_RENEWAL_PERIOD = timedelta(days=30)
-OPENER_MODE = 0o600
+OPENER_MODE = 0o640
 PEM_HEADER_AND_FOOTER_LEN = 52
 
 
@@ -76,7 +76,7 @@ class PrivateKeyLoader(object):
         only allow access to the owner of the file
         """
         key_stat = os.stat(filename)
-        if key_stat.st_mode & (stat.S_IRWXG | stat.S_IRWXO):
+        if key_stat.st_mode & (stat.S_IWGRP | stat.S_IXGRP | stat.S_IRWXO):
             raise X509Error("permissions ({:o}) are too open for {}".format(stat.S_IMODE(key_stat.st_mode), filename))
 
         with open(filename, 'rb') as key_file:

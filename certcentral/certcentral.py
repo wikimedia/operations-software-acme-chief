@@ -103,8 +103,8 @@ CHALLENGE_TYPES = {
     'http-01': ACMEChallengeType.HTTP01,
 }
 
-DNS_ZONE_UPDATE_CMD = '/bin/echo'  # TODO: Replace with the proper script
-DNS_ZONE_UPDATE_CMD_TIMEOUT = 60.0
+DEFAULT_DNS_ZONE_UPDATE_CMD = '/bin/echo'
+DEFAULT_DNS_ZONE_UPDATE_CMD_TIMEOUT = 60.0
 
 
 class CertificateStatus(Enum):
@@ -129,6 +129,19 @@ class CertCentralConfig:
         self.challenges = {}
         for challenge_type, challenge_config in challenges.items():
             if challenge_type == 'dns-01':
+                if not ('zone_update_cmd' in challenge_config and os.access(challenge_config['zone_update_cmd'],
+                                                                            os.X_OK)):
+                    logger.warning("Missing/invalid DNS zone updater CMD, using the default one: %s",
+                                   DEFAULT_DNS_ZONE_UPDATE_CMD)
+                    challenge_config['zone_update_cmd'] = DEFAULT_DNS_ZONE_UPDATE_CMD
+
+                try:
+                    challenge_config['zone_update_cmd_timeout'] = float(challenge_config['zone_update_cmd_timeout'])
+                except (KeyError, ValueError):
+                    logger.warning("Missing/invalid DNS zone updater CMD timeout, using the default one: %.2f",
+                                   DEFAULT_DNS_ZONE_UPDATE_CMD_TIMEOUT)
+                    challenge_config['zone_update_cmd_timeout'] = DEFAULT_DNS_ZONE_UPDATE_CMD_TIMEOUT
+
                 self.challenges[ACMEChallengeType.DNS01] = challenge_config
             elif challenge_type == 'http-01':
                 self.challenges[ACMEChallengeType.HTTP01] = challenge_config
@@ -320,25 +333,26 @@ class CertCentral():
                                                                                         directory_url=directory_url))
         return self.acme_sessions[acme_account_id]
 
-    @staticmethod
-    def _trigger_dns_zone_update(challenges):
+    def _trigger_dns_zone_update(self, challenges):
         """Triggers a DNS zone update. returns True if everything goes as expected. False otherwise"""
         logger.info("Triggering DNS zone update...")
+        cmd = self.config.challenges[ACMEChallengeType.DNS01]['zone_update_cmd']
+        timeout = self.config.challenges[ACMEChallengeType.DNS01]['zone_update_cmd_timeout']
         params = []
         for challenge in challenges:
             params.append(challenge.validation_domain_name)
             params.append(challenge.validation)
 
         try:
-            subprocess.check_call([DNS_ZONE_UPDATE_CMD] + params,
+            subprocess.check_call([cmd] + params,
                                   stdout=subprocess.DEVNULL,
                                   stderr=subprocess.DEVNULL,
-                                  timeout=DNS_ZONE_UPDATE_CMD_TIMEOUT)
+                                  timeout=timeout)
         except subprocess.CalledProcessError as cpe:
             logger.error("Unexpected return code spawning DNS zone updater: %d", cpe.returncode)
             return False
         except subprocess.TimeoutExpired:
-            logger.error("Unable to update DNS zone in %d seconds", DNS_ZONE_UPDATE_CMD_TIMEOUT)
+            logger.error("Unable to update DNS zone in %d seconds", timeout)
             return False
 
         return True

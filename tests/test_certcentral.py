@@ -12,9 +12,9 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from certcentral.acme_requests import (ACMEAccount, ACMEChallengeType,
                                        ACMEChallengeValidation, ACMEError,
                                        DNS01ACMEChallenge)
-from certcentral.certcentral import (DNS_ZONE_UPDATE_CMD,
-                                     DNS_ZONE_UPDATE_CMD_TIMEOUT, KEY_TYPES,
-                                     CertCentral, CertCentralConfig,
+from certcentral.certcentral import (DEFAULT_DNS_ZONE_UPDATE_CMD,
+                                     DEFAULT_DNS_ZONE_UPDATE_CMD_TIMEOUT,
+                                     KEY_TYPES, CertCentral, CertCentralConfig,
                                      CertificateStatus)
 from certcentral.x509 import (Certificate, CertificateSaveMode, ECPrivateKey,
                               PrivateKeyLoader, X509Error)
@@ -49,6 +49,8 @@ challenges:
             - 127.0.0.1
         sync_dns_servers:
             - 127.0.0.1
+        zone_update_cmd: /usr/bin/dns-update-zone
+        zone_update_cmd_timeout: 30.5
 '''
 
 VALID_CONFIG_EXAMPLE_WITHOUT_DEFAULT_ACCOUNT = '''
@@ -99,7 +101,8 @@ class CertCentralConfigTest(unittest.TestCase):
     def tearDown(self):
         self.base_path.cleanup()
 
-    def test_config_parsing(self):
+    @mock.patch('os.access', return_value=True)
+    def test_config_parsing(self, access_mock):
         with open(self.config_path, 'w') as config_file:
             config_file.write(VALID_CONFIG_EXAMPLE)
 
@@ -108,6 +111,10 @@ class CertCentralConfigTest(unittest.TestCase):
         self.assertEqual(len(config.certificates), 2)
         self.assertEqual(config.default_account, 'ee566f9e436e120082f0770c0d58dd6d')
         self.assertIn('default_account_certificate', config.authorized_hosts)
+        self.assertIn(ACMEChallengeType.DNS01, config.challenges)
+        self.assertEqual(config.challenges[ACMEChallengeType.DNS01]['zone_update_cmd'], '/usr/bin/dns-update-zone')
+        self.assertEqual(config.challenges[ACMEChallengeType.DNS01]['zone_update_cmd_timeout'], 30.5)
+        access_mock.assert_called_once_with('/usr/bin/dns-update-zone', os.X_OK)
 
     def test_config_without_explicit_default(self):
         with open(self.config_path, 'w') as config_file:
@@ -122,6 +129,27 @@ class CertCentralTest(unittest.TestCase):
     @mock.patch.object(CertCentral, 'sighup_handler')
     def setUp(self, sighup_handler_mock, signal_mock):
         self.instance = CertCentral()
+        self.instance.config = CertCentralConfig(
+            accounts=[{'id': '1945e767ad72a532ebca519242a801bf', 'directory': 'https://127.0.0.1:14000/dir'}],
+            certificates={
+                'test_certificate':
+                {
+                    'CN': 'certcentraltest.beta.wmflabs.org',
+                    'SNI': ['certcentraltest.beta.wmflabs.org'],
+                    'challenge': 'http-01',
+                },
+            },
+            default_account='1945e767ad72a532ebca519242a801bf',
+            authorized_hosts={
+                'test_certificate': ['localhost']
+            },
+            challenges={
+                'dns-01': {
+                    'validation_dns_servers': ['127.0.0.1'],
+                    'sync_dns_servers': ['127.0.0.1'],
+                }
+            }
+        )
 
         signal_mock.assert_called_once()
         sighup_handler_mock.assert_called_once()
@@ -146,28 +174,6 @@ class CertCentralTest(unittest.TestCase):
 
     @mock.patch('certcentral.certcentral.SelfSignedCertificate')
     def test_create_initial_tests(self, self_signed_cert_mock):
-        self.instance.config = CertCentralConfig(
-            accounts=[{'id': '1945e767ad72a532ebca519242a801bf', 'directory': 'https://127.0.0.1:14000/dir'}],
-            certificates={
-                'test_certificate':
-                {
-                    'CN': 'certcentraltest.beta.wmflabs.org',
-                    'SNI': ['certcentraltest.beta.wmflabs.org'],
-                    'challenge': 'http-01',
-                },
-            },
-            default_account='1945e767ad72a532ebca519242a801bf',
-            authorized_hosts={
-                'test_certificate': ['localhost']
-            },
-            challenges={
-                'dns-01': {
-                    'validation_dns_servers': ['127.0.0.1'],
-                    'sync_dns_servers': ['127.0.0.1'],
-                }
-            }
-        )
-
         self.instance.cert_status = {'test_certificate': {
             'ec-prime256v1': CertificateStatus.VALID,
             'rsa-2048': CertificateStatus.INITIAL,
@@ -208,28 +214,6 @@ class CertCentralTest(unittest.TestCase):
     @mock.patch.object(ACMEAccount, 'load')
     @mock.patch('certcentral.certcentral.ACMERequests')
     def test_get_acme_session(self, requests_mock, account_load_mock):
-        self.instance.config = CertCentralConfig(
-            accounts=[{'id': '1945e767ad72a532ebca519242a801bf', 'directory': 'https://127.0.0.1:14000/dir'}],
-            certificates={
-                'test_certificate':
-                {
-                    'CN': 'certcentraltest.beta.wmflabs.org',
-                    'SNI': ['certcentraltest.beta.wmflabs.org'],
-                    'challenge': 'http-01',
-                },
-            },
-            default_account='1945e767ad72a532ebca519242a801bf',
-            authorized_hosts={
-                'test_certificate': ['localhost']
-            },
-            challenges={
-                'dns-01': {
-                    'validation_dns_servers': ['127.0.0.1'],
-                    'sync_dns_servers': ['127.0.0.1'],
-                }
-            }
-        )
-
         session = self.instance._get_acme_session({
             'CN': 'certcentraltest.beta.wmflabs.org',
             'SNI': ['certcentraltest.beta.wmflabs.org'],
@@ -281,46 +265,29 @@ class CertCentralTest(unittest.TestCase):
             params.append(challenge.validation_domain_name)
             params.append(challenge.validation)
 
-        check_call_mock.assert_called_once_with([DNS_ZONE_UPDATE_CMD] + params,
+        cmd = self.instance.config.challenges[ACMEChallengeType.DNS01]['zone_update_cmd']
+        timeout = self.instance.config.challenges[ACMEChallengeType.DNS01]['zone_update_cmd_timeout']
+        check_call_mock.assert_called_once_with([cmd] + params,
                                                 stderr=subprocess.DEVNULL,
                                                 stdout=subprocess.DEVNULL,
-                                                timeout=DNS_ZONE_UPDATE_CMD_TIMEOUT)
+                                                timeout=timeout)
 
     @mock.patch('subprocess.check_call')
     def test_update_dns_zone_timeout(self, check_call_mock):
-        check_call_mock.side_effect = subprocess.TimeoutExpired([DNS_ZONE_UPDATE_CMD], DNS_ZONE_UPDATE_CMD_TIMEOUT)
+        cmd = self.instance.config.challenges[ACMEChallengeType.DNS01]['zone_update_cmd']
+        timeout = self.instance.config.challenges[ACMEChallengeType.DNS01]['zone_update_cmd_timeout']
+        check_call_mock.side_effect = subprocess.TimeoutExpired([cmd], timeout)
         ret_value = self.instance._trigger_dns_zone_update([])
         self.assertFalse(ret_value)
 
     @mock.patch('subprocess.check_call')
     def test_update_dns_zone_error(self, check_call_mock):
-        check_call_mock.side_effect = subprocess.CalledProcessError(1, [DNS_ZONE_UPDATE_CMD])
+        cmd = self.instance.config.challenges[ACMEChallengeType.DNS01]['zone_update_cmd']
+        check_call_mock.side_effect = subprocess.CalledProcessError(1, [cmd])
         ret_value = self.instance._trigger_dns_zone_update([])
         self.assertFalse(ret_value)
 
     def test_certificate_management(self):
-        self.instance.config = CertCentralConfig(
-            accounts=[{'id': '1945e767ad72a532ebca519242a801bf', 'directory': 'https://127.0.0.1:14000/dir'}],
-            certificates={
-                'test_certificate':
-                {
-                    'CN': 'certcentraltest.beta.wmflabs.org',
-                    'SNI': ['certcentraltest.beta.wmflabs.org'],
-                    'challenge': 'http-01',
-                },
-            },
-            default_account='1945e767ad72a532ebca519242a801bf',
-            authorized_hosts={
-                'test_certificate': ['localhost']
-            },
-            challenges={
-                'dns-01': {
-                    'validation_dns_servers': ['127.0.0.1'],
-                    'sync_dns_servers': ['127.0.0.1'],
-                }
-            }
-        )
-
         for status in [CertificateStatus.SELF_SIGNED,
                        CertificateStatus.NEEDS_RENEWAL,
                        CertificateStatus.EXPIRED]:
@@ -378,7 +345,8 @@ class CertCentralTest(unittest.TestCase):
 class CertCentralStatusTransitionTests(unittest.TestCase):
     @mock.patch('signal.signal')
     @mock.patch.object(CertCentral, 'sighup_handler')
-    def setUp(self, signal_mock, sighup_handler_mock):
+    @mock.patch('os.access', return_value=True)
+    def setUp(self, signal_mock, sighup_handler_mock, access_mock):
         self.instance = CertCentral()
 
         self.instance.config = CertCentralConfig(
@@ -390,6 +358,12 @@ class CertCentralStatusTransitionTests(unittest.TestCase):
                     'SNI': ['certcentraltest.beta.wmflabs.org'],
                     'challenge': 'http-01',
                 },
+                'test_certificate_dns01':
+                {
+                    'CN': 'certcentraltest.beta.wmflabs.org',
+                    'SNI': ['certcentraltest.beta.wmflabs.org'],
+                    'challenge': 'dns-01',
+                },
             },
             default_account='1945e767ad72a532ebca519242a801bf',
             authorized_hosts={
@@ -399,6 +373,7 @@ class CertCentralStatusTransitionTests(unittest.TestCase):
                 'dns-01': {
                     'validation_dns_servers': ['127.0.0.1'],
                     'sync_dns_servers': ['127.0.0.1'],
+                    'zone_update_cmd': '/usr/bin/update-zone-dns',
                 }
             }
         )
@@ -455,6 +430,40 @@ class CertCentralStatusTransitionTests(unittest.TestCase):
         http_challenge_mock_call = [mock.call.save(os.path.join(self.instance.challenges_path[ACMEChallengeType.HTTP01],
                                                                 http_challenge_mock.file_name))]
         http_challenge_mock.assert_has_calls(http_challenge_mock_call)
+        self.assertEqual(status, CertificateStatus.VALID)
+
+    @mock.patch('certcentral.certcentral.CertificateSigningRequest')
+    @mock.patch.object(CertCentral, '_trigger_dns_zone_update')
+    @mock.patch.object(CertCentral, '_get_acme_session')
+    @mock.patch.object(CertCentral, '_handle_pushed_csr')
+    def test_new_certificate_dns01(self, handle_pushed_csr_mock, get_acme_session_mock, dns_zone_update_mock, csr_mock):
+        handle_pushed_csr_mock.return_value = CertificateStatus.VALID
+        dns_challenge_mock = mock.MagicMock()
+        dns_challenge_mock.file_name = 'mocked_challenged_file_name'
+        get_acme_session_mock.return_value.push_csr.return_value = {
+            ACMEChallengeType.DNS01: [dns_challenge_mock],
+        }
+        status = self.instance._new_certificate('test_certificate_dns01', 'ec-prime256v1')
+
+        csr_mock.assert_called_once_with(common_name='certcentraltest.beta.wmflabs.org',
+                                         private_key=self.ec_key_mock.return_value,
+                                         sans=['certcentraltest.beta.wmflabs.org'])
+        self.ec_key_mock.assert_called_once()
+        expected_key_calls = [mock.call(),
+                              mock.call().generate(**KEY_TYPES['ec-prime256v1']['params']),
+                              mock.call().save(self.instance._get_path('test_certificate_dns01',
+                                                                       'ec-prime256v1',
+                                                                       public=False,
+                                                                       kind='new'))]
+        self.ec_key_mock.assert_has_calls(expected_key_calls)
+        get_acme_session_mock.assert_called_once()
+        acme_session_calls = [mock.call(self.instance.config.certificates['test_certificate_dns01']),
+                              mock.call().push_csr(csr_mock.return_value)]
+        get_acme_session_mock.assert_has_calls(acme_session_calls)
+        dns_zone_update_mock.assert_called_once()
+        dns_challenge_mock_call = [mock.call.save(os.path.join(self.instance.challenges_path[ACMEChallengeType.DNS01],
+                                                               dns_challenge_mock.file_name))]
+        dns_challenge_mock.assert_has_calls(dns_challenge_mock_call)
         self.assertEqual(status, CertificateStatus.VALID)
 
     @mock.patch.object(PrivateKeyLoader, 'load')

@@ -112,7 +112,7 @@ def create_app(base_path=BASEPATH, cert_central_config=None):
             with open(fpath, 'rb') as requested_f:
                 file_contents = requested_f.read()
         except OSError as ose:
-            app.logger.info(ose)
+            app.logger.error(ose)
             abort(503, 'unable to fulfill request')
 
         if api != 'metadata':

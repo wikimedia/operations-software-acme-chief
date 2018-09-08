@@ -316,7 +316,7 @@ class Certificate:
         return self.certificate.issuer == self.certificate.subject
 
     def save(self, path, mode=CertificateSaveMode.CERT_ONLY):
-        """Persists the certificate on disk serializad as a PEM"""
+        """Persists the certificate on disk serialized as a PEM"""
         if mode is CertificateSaveMode.CERT_ONLY:
             save_chain = self.chain[0:1]
         elif mode is CertificateSaveMode.CHAIN_ONLY:

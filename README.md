@@ -15,6 +15,13 @@ It is intended for use in multi-server environments where any one of several act
 shared filesystem are required to terminate TLS connections, where it is not feasible to have each
 server requesting their own certificates from ACME servers.
 
+One thing to note is that there are two stages when certcentral is outputting certificates: the
+initial, self-signed certificate, and the trusted one issued through ACME. The initial stage is
+done to help with cases where servers need a dummy certificate to start up, which may be required
+in order to *get* the publicly-trusted certificates at all (thus resolving a chicken-and-egg
+problem). A side-effect of this is zero-byte PEM files for the chain, which for self-signed
+certificates is empty.
+
 One variant of the API permits simple use by puppet.
 It is hoped that eventually this will be used to handle certificates for wikipedia.org and co.
 

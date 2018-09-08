@@ -311,14 +311,16 @@ class CertCentral():
                 key.generate(**key_type_details['params'])
                 key.save(self._get_path(cert_id, key_type_id, public=False, kind='live'))
 
-                cert = SelfSignedCertificate(
+                cert = Certificate(SelfSignedCertificate(
                     private_key=key,
                     common_name="Snakeoil cert",
                     sans=(),
                     from_date=datetime.datetime.utcnow(),
                     until_date=datetime.datetime.utcnow() + datetime.timedelta(days=3),
-                )
-                cert.save(self._get_path(cert_id, key_type_id, public=True, kind='live'))
+                ).pem)
+                for cert_type, cert_type_details in CERTIFICATE_TYPES.items():
+                    path = self._get_path(cert_id, key_type_id, public=True, kind='live', cert_type=cert_type)
+                    cert.save(path, mode=cert_type_details['save_mode'])
                 self.cert_status[cert_id][key_type_id] = CertificateStatus.SELF_SIGNED
 
     def _get_acme_session(self, cert_details):

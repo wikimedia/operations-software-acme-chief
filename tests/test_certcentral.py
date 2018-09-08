@@ -14,8 +14,8 @@ from certcentral.acme_requests import (ACMEAccount, ACMEChallengeType,
                                        DNS01ACMEChallenge)
 from certcentral.certcentral import (DEFAULT_DNS_ZONE_UPDATE_CMD,
                                      DEFAULT_DNS_ZONE_UPDATE_CMD_TIMEOUT,
-                                     KEY_TYPES, CertCentral, CertCentralConfig,
-                                     CertificateStatus)
+                                     KEY_TYPES, CERTIFICATE_TYPES, CertCentral,
+                                     CertCentralConfig, CertificateStatus)
 from certcentral.x509 import (Certificate, CertificateSaveMode, ECPrivateKey,
                               PrivateKeyLoader, X509Error)
 from tests.test_pebble import (BaseDNSRequestHandler,
@@ -173,7 +173,8 @@ class CertCentralTest(unittest.TestCase):
         create_initial_certs_mock.assert_called_once()
 
     @mock.patch('certcentral.certcentral.SelfSignedCertificate')
-    def test_create_initial_tests(self, self_signed_cert_mock):
+    @mock.patch('certcentral.certcentral.Certificate')
+    def test_create_initial_tests(self, cert_mock, self_signed_cert_mock):
         self.instance.cert_status = {'test_certificate': {
             'ec-prime256v1': CertificateStatus.VALID,
             'rsa-2048': CertificateStatus.INITIAL,
@@ -186,6 +187,8 @@ class CertCentralTest(unittest.TestCase):
         rsa_key = deepcopy(KEY_TYPES['rsa-2048'])
         rsa_key['class'] = rsa_key_mock
 
+        self_signed_cert_pem = b'-----BEGIN CERTIFICATE-----\nMIIBLjCB1qADAgECAhRxJCFPZ3GhYbLItsUmpIoJSJYR5zAKBggqhkjOPQQDAjAY\nMRYwFAYDVQQDDA1TbmFrZW9pbCBjZXJ0MB4XDTE4MDkwODAwNTQwMVoXDTE4MDkx\nMTAwNTQwMVowGDEWMBQGA1UEAwwNU25ha2VvaWwgY2VydDBZMBMGByqGSM49AgEG\nCCqGSM49AwEHA0IABDqt32diDH9nQxqFRq6v6KKiHqYMHtV17NaRx5MZaYa+W1kV\nfHYsaDgturMPH0mHgwyOIxeDsunNxQ9l9Ky/wPUwCgYIKoZIzj0EAwIDRwAwRAIg\nDKvGUasaWse5Lmv4vK+LuSxOt6bS/R2yqOML+9p1xk8CIHApbLL1bb2M2olXzPOE\ntgBTOv5Voi32fqjBMgXMh/Yd\n-----END CERTIFICATE-----\n'
+        type(self_signed_cert_mock.return_value).pem = mock.PropertyMock(return_value=self_signed_cert_pem)
         with mock.patch.dict('certcentral.certcentral.KEY_TYPES', {'ec-prime256v1': ec_key, 'rsa-2048': rsa_key}):
             self.instance.create_initial_certs()
 
@@ -206,10 +209,18 @@ class CertCentralTest(unittest.TestCase):
         self.assertFalse(kwargs['sans'])
         self.assertEqual(kwargs['private_key'], rsa_key_mock.return_value)
         self.assertLess(kwargs['until_date'] - kwargs['from_date'], timedelta(days=7))
-        self_signed_cert_mock.assert_has_calls([mock.call().save(self.instance._get_path('test_certificate',
-                                                                                         'rsa-2048',
-                                                                                         public=True,
-                                                                                         kind='live'))])
+        cert_mock.assert_has_calls([mock.call(self_signed_cert_pem)] + [
+            mock.call().save(
+                self.instance._get_path('test_certificate',
+                                        'rsa-2048',
+                                        public=True,
+                                        kind='live',
+                                        cert_type=cert_type
+                ),
+                mode=cert_type_details['save_mode']
+            )
+            for cert_type, cert_type_details in CERTIFICATE_TYPES.items()
+        ])
 
     @mock.patch.object(ACMEAccount, 'load')
     @mock.patch('certcentral.certcentral.ACMERequests')

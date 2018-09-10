@@ -339,11 +339,15 @@ class CertCentral():
         """Triggers a DNS zone update. returns True if everything goes as expected. False otherwise"""
         logger.info("Triggering DNS zone update...")
         cmd = self.config.challenges[ACMEChallengeType.DNS01]['zone_update_cmd']
+        remote_servers = self.config.challenges[ACMEChallengeType.DNS01]['sync_dns_servers']
         timeout = self.config.challenges[ACMEChallengeType.DNS01]['zone_update_cmd_timeout']
         params = []
         for challenge in challenges:
             params.append(challenge.validation_domain_name)
             params.append(challenge.validation)
+
+        params.append('--remote-servers')
+        params += remote_servers
 
         try:
             subprocess.check_call([cmd] + params,

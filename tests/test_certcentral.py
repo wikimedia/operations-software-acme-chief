@@ -276,6 +276,8 @@ class CertCentralTest(unittest.TestCase):
             params.append(challenge.validation_domain_name)
             params.append(challenge.validation)
 
+        params.append('--remote-servers')
+        params += self.instance.config.challenges[ACMEChallengeType.DNS01]['sync_dns_servers']
         cmd = self.instance.config.challenges[ACMEChallengeType.DNS01]['zone_update_cmd']
         timeout = self.instance.config.challenges[ACMEChallengeType.DNS01]['zone_update_cmd_timeout']
         check_call_mock.assert_called_once_with([cmd] + params,

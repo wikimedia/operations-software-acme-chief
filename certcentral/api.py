@@ -105,12 +105,13 @@ def create_app(base_path=BASEPATH, cert_central_config=None):
 
         client_dn = client_dn[3:]
 
-        app.logger.info('Client {} identified as {} requested {} part {}'.format(
+        app.logger.info(
+            'Client %s identified as %s requested %s part %s',
             flask.request.remote_addr,
             client_dn,
             certname,
             part
-        ))
+        )
 
         if certname not in state['config'].certificates:
             abort(404, 'no such certname')

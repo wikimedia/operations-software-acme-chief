@@ -67,7 +67,7 @@ def secure_opener(path, flags):
     return os.open(path, flags, OPENER_MODE)
 
 
-class PrivateKeyLoader(object):
+class PrivateKeyLoader():
     """PrivateKey factory that reads an existing key from disk"""
     @staticmethod
     def load(filename):
@@ -87,10 +87,9 @@ class PrivateKeyLoader(object):
             )
             if isinstance(private_key, rsa.RSAPrivateKey):
                 return RSAPrivateKey(private_key=private_key)
-            elif isinstance(private_key, ec.EllipticCurvePrivateKey):
+            if isinstance(private_key, ec.EllipticCurvePrivateKey):
                 return ECPrivateKey(private_key=private_key)
-            else:
-                raise NotImplementedError("Unsupported private key type")
+            raise NotImplementedError("Unsupported private key type")
 
 
 class PrivateKey(abc.ABC):
@@ -159,7 +158,7 @@ class ECPrivateKey(PrivateKey):
         )
 
 
-class BaseX509Builder(object):
+class BaseX509Builder():
     """
     Base class for CSR and SelfSignedCertificate classes. It centralizes common stuff:
         - common name

@@ -6,7 +6,7 @@ with open("README.md", "r") as fh:
 extras_require = {
     # Test dependencies
     'tests': [
-        'pylint < 1.7.0',  # TODO: Why a maximum?
+        'pylint',
         'pytest-cov >= 1.8.0',
         'dnslib >= 0.9.7',
         'requests-mock >= 1.0.0',

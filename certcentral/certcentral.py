@@ -346,6 +346,7 @@ class CertCentral():
             params.append(challenge.validation_domain_name)
             params.append(challenge.validation)
 
+        logger.info("Running subprocess %s", [cmd] + params)
         try:
             subprocess.check_call([cmd] + params,
                                   stdout=subprocess.DEVNULL,

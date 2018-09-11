@@ -393,10 +393,14 @@ class CertCentral():
                 challenge.save(os.path.join(self.challenges_path[challenge_type],
                                             challenge.file_name))
         except OSError:
+            logger.exception("OSError encountered while saving challenge type %s for certificate %s / %s",
+                             challenge_type, cert_id, key_type_id)
             return CertificateStatus.SELF_SIGNED
 
         if challenge_type == ACMEChallengeType.DNS01:
             if not self._trigger_dns_zone_update(challenges[challenge_type]):
+                logger.warning("Failed to perform DNS zone update for certificate %s / %s",
+                               cert_id, key_type_id)
                 return CertificateStatus.SELF_SIGNED
 
         status = CertificateStatus.CSR_PUSHED
@@ -413,6 +417,8 @@ class CertCentral():
         try:
             private_key = PrivateKeyLoader.load(self._get_path(cert_id, key_type_id, public=False, kind='new'))
         except (OSError, X509Error):
+            logger.exception("Failed to load new private key for certificate %s / %s",
+                             cert_id, key_type_id)
             return CertificateStatus.SELF_SIGNED
 
         cert_details = self.config.certificates[cert_id]
@@ -430,6 +436,8 @@ class CertCentral():
         try:
             challenges = session.challenges[csr_id][challenge_type]
         except KeyError:
+            logger.exception("Could not find challenge for challenge type %s, certificate %s / %s",
+                             challenge_type, cert_id, key_type_id)
             return CertificateStatus.SELF_SIGNED
 
         for challenge in challenges:
@@ -458,6 +466,8 @@ class CertCentral():
         try:
             private_key = PrivateKeyLoader.load(self._get_path(cert_id, key_type_id, public=False, kind='new'))
         except (OSError, X509Error):
+            logger.exception("Failed to load new private key for certificate %s / %s",
+                             cert_id, key_type_id)
             return CertificateStatus.SELF_SIGNED
 
         cert_details = self.config.certificates[cert_id]
@@ -473,13 +483,20 @@ class CertCentral():
             session.push_solved_challenges(csr_id, challenge_type=challenge_type)
         except ACMEOrderNotFound:
             # unable to find CSR in current ACME session, go back to the initial step
+            logger.exception("Could not find ACME order when pushing solved challenges for challenge type %s, "
+                             "certificate %s / %s",
+                             challenge_type, cert_id, key_type_id)
             return CertificateStatus.SELF_SIGNED
 
         try:
             return self._handle_pushed_challenges(cert_id, key_type_id)
         except ACMEOrderNotFound:
+            logger.exception("Could not find ACME order when handling pushed challenges for certificate %s / %s",
+                             cert_id, key_type_id)
             return CertificateStatus.SELF_SIGNED
         except ACMEError:
+            logger.exception("ACMEError when handling pushed challenges for certificate %s / %s",
+                             cert_id, key_type_id)
             return CertificateStatus.CHALLENGES_PUSHED
 
     def _handle_pushed_challenges(self, cert_id, key_type_id):
@@ -491,6 +508,8 @@ class CertCentral():
         try:
             private_key = PrivateKeyLoader.load(self._get_path(cert_id, key_type_id, public=False, kind='new'))
         except (OSError, X509Error):
+            logger.exception("Failed to load new private key for certificate %s / %s",
+                             cert_id, key_type_id)
             return CertificateStatus.SELF_SIGNED
 
         cert_details = self.config.certificates[cert_id]
@@ -505,11 +524,17 @@ class CertCentral():
         try:
             certificate = session.get_certificate(csr_id)
         except (ACMEOrderNotFound, ACMEInvalidChallengeError):
+            logger.exception("Problem getting certificate for certificate %s / %s",
+                             cert_id, key_type_id)
             return CertificateStatus.SELF_SIGNED
         except ACMEError:
+            logger.exception("Problem getting certificate for certificate %s / %s",
+                             cert_id, key_type_id)
             return CertificateStatus.CHALLENGES_PUSHED
 
         if certificate is None:
+            logger.warning("Returned certificate is None for certificate %s / %s",
+                           cert_id, key_type_id)
             return CertificateStatus.CHALLENGES_PUSHED
 
         certificate.save(self._get_path(cert_id, key_type_id, public=True, kind='new', cert_type='full_chain'),
@@ -528,6 +553,8 @@ class CertCentral():
                 cert.save(self._get_path(cert_id, key_type_id, public=True, kind='live', cert_type=cert_type),
                           mode=cert_type_details['save_mode'])
         except (OSError, X509Error):
+            logger.exception("Problem pushing live certificate %s / %s",
+                             cert_id, key_type_id)
             return CertificateStatus.SELF_SIGNED
 
         return CertificateStatus.VALID

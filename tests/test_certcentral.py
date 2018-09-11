@@ -271,19 +271,37 @@ class CertCentralTest(unittest.TestCase):
                       DNS01ACMEChallenge('_acme-challenge.wmflabs.test', 'fake-challenge2')]
         ret_value = self.instance._trigger_dns_zone_update(challenges)
         self.assertTrue(ret_value)
-        params = []
+        params = ['--remote-servers']
+        params += self.instance.config.challenges[ACMEChallengeType.DNS01]['sync_dns_servers']
+        params += ['--']
+
         for challenge in challenges:
             params.append(challenge.validation_domain_name)
             params.append(challenge.validation)
 
-        params.append('--remote-servers')
-        params += self.instance.config.challenges[ACMEChallengeType.DNS01]['sync_dns_servers']
         cmd = self.instance.config.challenges[ACMEChallengeType.DNS01]['zone_update_cmd']
         timeout = self.instance.config.challenges[ACMEChallengeType.DNS01]['zone_update_cmd_timeout']
         check_call_mock.assert_called_once_with([cmd] + params,
                                                 stderr=subprocess.DEVNULL,
                                                 stdout=subprocess.DEVNULL,
                                                 timeout=timeout)
+
+    @mock.patch('subprocess.check_call')
+    def test_update_dns_zone_hyphens(self, check_call_mock):
+        """
+        This ensures that if challenges begin with hyphen they do not appear in the DNS zone
+        update command before the double hyphen, to prevent them being misinterpreted.
+        """
+        challenges = [DNS01ACMEChallenge('_acme-challenge.wmflabs.test', '-fake-challenge1'),
+                      DNS01ACMEChallenge('_acme-challenge.wmflabs.test', '-fake-challenge2')]
+        self.instance._trigger_dns_zone_update(challenges)
+        args, _ = check_call_mock.call_args
+        self.assertEqual(len(args), 1)
+        params, = args
+
+        self.assertIn('--', params)
+        for check_param in params[:params.index('--')]:
+            self.assertNotIn(check_param, ['-fake-challenge1', '-fake-challenge2'])
 
     @mock.patch('subprocess.check_call')
     def test_update_dns_zone_timeout(self, check_call_mock):

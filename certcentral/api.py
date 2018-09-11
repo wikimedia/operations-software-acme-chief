@@ -6,6 +6,7 @@ Wikimedia Foundation 2018
 """
 import hashlib
 import os
+import signal
 import stat
 
 import flask
@@ -47,14 +48,26 @@ def get_file_metadata(file_path, file_contents):
 
 def create_app(base_path=BASEPATH, cert_central_config=None):
     """Creates the flask app with the embedded CertCentralConfig"""
+    app = flask.Flask(__name__)
+
     live_certs_path = os.path.join(base_path, CertCentral.live_certs_path)
 
-    if cert_central_config is None:
+    config_path = None
+    confd_path = None
+    state = {'config': cert_central_config}
+
+    def sighup_handler():
+        """
+        When receiving SIGHUP signals, reload config.
+        """
+        app.logger.info("SIGHUP received")
+        state['config'] = CertCentralConfig.load(config_path, confd_path=confd_path)
+
+    if state['config'] is None:
         config_path = os.path.join(base_path, CertCentral.config_path)
         confd_path = os.path.join(base_path, CertCentral.confd_path)
-        cert_central_config = CertCentralConfig.load(config_path, confd_path=confd_path)
-
-    app = flask.Flask(__name__)
+        signal.signal(signal.SIGHUP, sighup_handler)
+        sighup_handler()
 
     @app.route("/certs/<certname>/<part>")
     @app.route("/puppet/v3/file_<api>/acmedata/<certname>/<part>")
@@ -99,10 +112,10 @@ def create_app(base_path=BASEPATH, cert_central_config=None):
             part
         ))
 
-        if certname not in cert_central_config.certificates:
+        if certname not in state['config'].certificates:
             abort(404, 'no such certname')
 
-        if client_dn not in cert_central_config.authorized_hosts[certname]:
+        if client_dn not in state['config'].authorized_hosts[certname]:
             abort(403, 'access denied')
 
         fname = '{}.{}'.format(certname, part)

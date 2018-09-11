@@ -1,4 +1,6 @@
+import mock
 import os
+import signal
 import tempfile
 import unittest
 
@@ -105,6 +107,20 @@ class CertCentralApiTest(unittest.TestCase):
             result = self.app.get(route.format(**args), headers=VALID_HEADERS)
             self.assertEqual(result.status_code, 404)
             self.assertEqual(result.data, b'no such certname')
+
+    @mock.patch('signal.signal')
+    @mock.patch.object(CertCentralConfig, 'load')
+    def test_sighup(self, cert_central_config_load_mock, signal_mock):
+        app = create_app(base_path=self.base_path.name).test_client()
+        (sig, f), _ = signal_mock.call_args
+        self.assertEqual(sig, signal.SIGHUP)
+        cert_central_config_load_mock.reset_mock()
+        f()  # simulate SIGHUP
+
+        config_path = os.path.join(self.base_path.name, CertCentral.config_path)
+        confd_path = os.path.join(self.base_path.name, CertCentral.confd_path)
+
+        cert_central_config_load_mock.assert_called_once_with(config_path, confd_path=confd_path)
 
     def test_access_denied(self):
         args = {

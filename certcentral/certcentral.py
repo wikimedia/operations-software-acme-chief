@@ -117,6 +117,7 @@ class CertificateStatus(Enum):
     VALID = 6                 # Valid certificate
     NEEDS_RENEWAL = 7         # Valid certificate that needs to be renew soon!
     EXPIRED = 8               # Expired certificate
+    SUBJECTS_CHANGED = 9      # Configuration of cert (CN/SANs) has changed, need to re-issue
 
 
 class CertCentralConfig:
@@ -246,16 +247,35 @@ class CertCentral():
         """
         status = collections.defaultdict(dict)
 
-        def _get_certificate_status(cert_id, certificate):
+        def _get_certificate_status(cert_id, key_type_id, certificate):
             if certificate.self_signed is True:
                 return CertificateStatus.SELF_SIGNED
 
             if datetime.datetime.utcnow() > certificate.certificate.not_valid_after:
-                logger.warning("Certificate %s expired on %s", cert_id, certificate.certificate.not_valid_after)
+                logger.warning("Certificate %s type %s expired on %s", cert_id, key_type_id,
+                               certificate.certificate.not_valid_after)
                 return CertificateStatus.EXPIRED
 
             if certificate.needs_renew():
                 return CertificateStatus.NEEDS_RENEWAL
+
+            cur_cn = certificate.common_name.lower()
+            new_cn = self.config.certificates[cert_id]['CN'].lower()
+            if cur_cn != new_cn:
+                logger.warning(
+                    'Certificate %s type %s has CN %s but is configured for %s, moving back to re-issue',
+                    cert_id, key_type_id, cur_cn, new_cn
+                )
+                return CertificateStatus.SUBJECTS_CHANGED
+
+            cur_sans = {san.lower() for san in certificate.subject_alternative_names}
+            new_sans = {san.lower() for san in self.config.certificates[cert_id]['SNI']}
+            if cur_sans != new_sans:
+                logger.warning(
+                    'Certificate %s type %s has SANs %s but is configured for %s, moving back to re-issue',
+                    cert_id, key_type_id, cur_sans, new_sans
+                )
+                return CertificateStatus.SUBJECTS_CHANGED
 
             return CertificateStatus.VALID
 
@@ -271,7 +291,7 @@ class CertCentral():
 
                 try:
                     certificate = Certificate.load(self._get_path(cert_id, key_type_id, public=True, kind='live'))
-                    status[cert_id][key_type_id] = _get_certificate_status(cert_id, certificate)
+                    status[cert_id][key_type_id] = _get_certificate_status(cert_id, key_type_id, certificate)
                 except (OSError, X509Error):
                     status[cert_id][key_type_id] = CertificateStatus.INITIAL
 
@@ -573,9 +593,10 @@ class CertCentral():
                     cert_status = self.cert_status[cert_id][key_type_id]
                     if cert_status is CertificateStatus.VALID:
                         continue
-                    elif cert_status in [CertificateStatus.SELF_SIGNED,
+                    elif cert_status in (CertificateStatus.SELF_SIGNED,
                                          CertificateStatus.NEEDS_RENEWAL,
-                                         CertificateStatus.EXPIRED]:
+                                         CertificateStatus.EXPIRED,
+                                         CertificateStatus.SUBJECTS_CHANGED):
                         new_status = self._new_certificate(cert_id, key_type_id)
                     elif cert_status is CertificateStatus.CSR_PUSHED:
                         new_status = self._handle_pushed_csr(cert_id, key_type_id)

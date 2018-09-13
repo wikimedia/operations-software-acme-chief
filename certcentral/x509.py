@@ -314,6 +314,26 @@ class Certificate:
         """Returns True if the certificate is self signed, False otherwise"""
         return self.certificate.issuer == self.certificate.subject
 
+    @property
+    def common_name(self):
+        """Gets the Common Name (CN) of this certificate"""
+        name_attrs = self.certificate.subject.get_attributes_for_oid(NameOID.COMMON_NAME)
+        if not name_attrs:
+            raise X509Error('Unable to get the Common Name of the certificate')
+        if len(name_attrs) > 1:
+            raise X509Error('Unexpected number of common name attributes')
+
+        return name_attrs[0].value
+
+    @property
+    def subject_alternative_names(self):
+        """Gets the subject alternative names in this certificate, as a list of strings"""
+        try:
+            san_ext = self.certificate.extensions.get_extension_for_class(crypto_x509.SubjectAlternativeName)
+        except crypto_x509.ExtensionNotFound:  # no SANs
+            return []
+        return [v.value for v in san_ext.value]
+
     def save(self, path, mode=CertificateSaveMode.CERT_ONLY):
         """Persists the certificate on disk serialized as a PEM"""
         if mode is CertificateSaveMode.CERT_ONLY:

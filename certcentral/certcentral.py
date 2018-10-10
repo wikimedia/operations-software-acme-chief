@@ -117,6 +117,7 @@ class CertificateStatus(Enum):
     VALID = 6                 # Valid certificate
     NEEDS_RENEWAL = 7         # Valid certificate that needs to be renew soon!
     EXPIRED = 8               # Expired certificate
+    SUBJECTS_CHANGED = 9      # Configuration of cert (CN/SANs) has changed, need to re-issue
 
 
 class CertCentralConfig:
@@ -246,16 +247,35 @@ class CertCentral():
         """
         status = collections.defaultdict(dict)
 
-        def _get_certificate_status(cert_id, certificate):
+        def _get_certificate_status(cert_id, key_type_id, certificate):
             if certificate.self_signed is True:
                 return CertificateStatus.SELF_SIGNED
 
             if datetime.datetime.utcnow() > certificate.certificate.not_valid_after:
-                logger.warning("Certificate %s expired on %s", cert_id, certificate.certificate.not_valid_after)
+                logger.warning("Certificate %s type %s expired on %s", cert_id, key_type_id,
+                               certificate.certificate.not_valid_after)
                 return CertificateStatus.EXPIRED
 
             if certificate.needs_renew():
                 return CertificateStatus.NEEDS_RENEWAL
+
+            cur_cn = certificate.common_name.lower()
+            new_cn = self.config.certificates[cert_id]['CN'].lower()
+            if cur_cn != new_cn:
+                logger.warning(
+                    'Certificate %s type %s has CN %s but is configured for %s, moving back to re-issue',
+                    cert_id, key_type_id, cur_cn, new_cn
+                )
+                return CertificateStatus.SUBJECTS_CHANGED
+
+            cur_sans = {san.lower() for san in certificate.subject_alternative_names}
+            new_sans = {san.lower() for san in self.config.certificates[cert_id]['SNI']}
+            if cur_sans != new_sans:
+                logger.warning(
+                    'Certificate %s type %s has SANs %s but is configured for %s, moving back to re-issue',
+                    cert_id, key_type_id, cur_sans, new_sans
+                )
+                return CertificateStatus.SUBJECTS_CHANGED
 
             return CertificateStatus.VALID
 
@@ -271,7 +291,7 @@ class CertCentral():
 
                 try:
                     certificate = Certificate.load(self._get_path(cert_id, key_type_id, public=True, kind='live'))
-                    status[cert_id][key_type_id] = _get_certificate_status(cert_id, certificate)
+                    status[cert_id][key_type_id] = _get_certificate_status(cert_id, key_type_id, certificate)
                 except (OSError, X509Error):
                     status[cert_id][key_type_id] = CertificateStatus.INITIAL
 
@@ -311,14 +331,16 @@ class CertCentral():
                 key.generate(**key_type_details['params'])
                 key.save(self._get_path(cert_id, key_type_id, public=False, kind='live'))
 
-                cert = SelfSignedCertificate(
+                cert = Certificate(SelfSignedCertificate(
                     private_key=key,
                     common_name="Snakeoil cert",
                     sans=(),
                     from_date=datetime.datetime.utcnow(),
                     until_date=datetime.datetime.utcnow() + datetime.timedelta(days=3),
-                )
-                cert.save(self._get_path(cert_id, key_type_id, public=True, kind='live'))
+                ).pem)
+                for cert_type, cert_type_details in CERTIFICATE_TYPES.items():
+                    path = self._get_path(cert_id, key_type_id, public=True, kind='live', cert_type=cert_type)
+                    cert.save(path, mode=cert_type_details['save_mode'])
                 self.cert_status[cert_id][key_type_id] = CertificateStatus.SELF_SIGNED
 
     def _get_acme_session(self, cert_details):
@@ -337,12 +359,14 @@ class CertCentral():
         """Triggers a DNS zone update. returns True if everything goes as expected. False otherwise"""
         logger.info("Triggering DNS zone update...")
         cmd = self.config.challenges[ACMEChallengeType.DNS01]['zone_update_cmd']
+        remote_servers = self.config.challenges[ACMEChallengeType.DNS01]['sync_dns_servers']
         timeout = self.config.challenges[ACMEChallengeType.DNS01]['zone_update_cmd_timeout']
-        params = []
+        params = ['--remote-servers'] + remote_servers + ['--']
         for challenge in challenges:
             params.append(challenge.validation_domain_name)
             params.append(challenge.validation)
 
+        logger.info("Running subprocess %s", [cmd] + params)
         try:
             subprocess.check_call([cmd] + params,
                                   stdout=subprocess.DEVNULL,
@@ -390,10 +414,14 @@ class CertCentral():
                 challenge.save(os.path.join(self.challenges_path[challenge_type],
                                             challenge.file_name))
         except OSError:
+            logger.exception("OSError encountered while saving challenge type %s for certificate %s / %s",
+                             challenge_type, cert_id, key_type_id)
             return CertificateStatus.SELF_SIGNED
 
         if challenge_type == ACMEChallengeType.DNS01:
             if not self._trigger_dns_zone_update(challenges[challenge_type]):
+                logger.warning("Failed to perform DNS zone update for certificate %s / %s",
+                               cert_id, key_type_id)
                 return CertificateStatus.SELF_SIGNED
 
         status = CertificateStatus.CSR_PUSHED
@@ -410,6 +438,8 @@ class CertCentral():
         try:
             private_key = PrivateKeyLoader.load(self._get_path(cert_id, key_type_id, public=False, kind='new'))
         except (OSError, X509Error):
+            logger.exception("Failed to load new private key for certificate %s / %s",
+                             cert_id, key_type_id)
             return CertificateStatus.SELF_SIGNED
 
         cert_details = self.config.certificates[cert_id]
@@ -427,6 +457,8 @@ class CertCentral():
         try:
             challenges = session.challenges[csr_id][challenge_type]
         except KeyError:
+            logger.exception("Could not find challenge for challenge type %s, certificate %s / %s",
+                             challenge_type, cert_id, key_type_id)
             return CertificateStatus.SELF_SIGNED
 
         for challenge in challenges:
@@ -455,6 +487,8 @@ class CertCentral():
         try:
             private_key = PrivateKeyLoader.load(self._get_path(cert_id, key_type_id, public=False, kind='new'))
         except (OSError, X509Error):
+            logger.exception("Failed to load new private key for certificate %s / %s",
+                             cert_id, key_type_id)
             return CertificateStatus.SELF_SIGNED
 
         cert_details = self.config.certificates[cert_id]
@@ -470,13 +504,20 @@ class CertCentral():
             session.push_solved_challenges(csr_id, challenge_type=challenge_type)
         except ACMEOrderNotFound:
             # unable to find CSR in current ACME session, go back to the initial step
+            logger.exception("Could not find ACME order when pushing solved challenges for challenge type %s, "
+                             "certificate %s / %s",
+                             challenge_type, cert_id, key_type_id)
             return CertificateStatus.SELF_SIGNED
 
         try:
             return self._handle_pushed_challenges(cert_id, key_type_id)
         except ACMEOrderNotFound:
+            logger.exception("Could not find ACME order when handling pushed challenges for certificate %s / %s",
+                             cert_id, key_type_id)
             return CertificateStatus.SELF_SIGNED
         except ACMEError:
+            logger.exception("ACMEError when handling pushed challenges for certificate %s / %s",
+                             cert_id, key_type_id)
             return CertificateStatus.CHALLENGES_PUSHED
 
     def _handle_pushed_challenges(self, cert_id, key_type_id):
@@ -488,6 +529,8 @@ class CertCentral():
         try:
             private_key = PrivateKeyLoader.load(self._get_path(cert_id, key_type_id, public=False, kind='new'))
         except (OSError, X509Error):
+            logger.exception("Failed to load new private key for certificate %s / %s",
+                             cert_id, key_type_id)
             return CertificateStatus.SELF_SIGNED
 
         cert_details = self.config.certificates[cert_id]
@@ -502,11 +545,17 @@ class CertCentral():
         try:
             certificate = session.get_certificate(csr_id)
         except (ACMEOrderNotFound, ACMEInvalidChallengeError):
+            logger.exception("Problem getting certificate for certificate %s / %s",
+                             cert_id, key_type_id)
             return CertificateStatus.SELF_SIGNED
         except ACMEError:
+            logger.exception("Problem getting certificate for certificate %s / %s",
+                             cert_id, key_type_id)
             return CertificateStatus.CHALLENGES_PUSHED
 
         if certificate is None:
+            logger.warning("Returned certificate is None for certificate %s / %s",
+                           cert_id, key_type_id)
             return CertificateStatus.CHALLENGES_PUSHED
 
         certificate.save(self._get_path(cert_id, key_type_id, public=True, kind='new', cert_type='full_chain'),
@@ -525,6 +574,8 @@ class CertCentral():
                 cert.save(self._get_path(cert_id, key_type_id, public=True, kind='live', cert_type=cert_type),
                           mode=cert_type_details['save_mode'])
         except (OSError, X509Error):
+            logger.exception("Problem pushing live certificate %s / %s",
+                             cert_id, key_type_id)
             return CertificateStatus.SELF_SIGNED
 
         return CertificateStatus.VALID
@@ -542,9 +593,10 @@ class CertCentral():
                     cert_status = self.cert_status[cert_id][key_type_id]
                     if cert_status is CertificateStatus.VALID:
                         continue
-                    elif cert_status in [CertificateStatus.SELF_SIGNED,
+                    elif cert_status in (CertificateStatus.SELF_SIGNED,
                                          CertificateStatus.NEEDS_RENEWAL,
-                                         CertificateStatus.EXPIRED]:
+                                         CertificateStatus.EXPIRED,
+                                         CertificateStatus.SUBJECTS_CHANGED):
                         new_status = self._new_certificate(cert_id, key_type_id)
                     elif cert_status is CertificateStatus.CSR_PUSHED:
                         new_status = self._handle_pushed_csr(cert_id, key_type_id)

@@ -6,7 +6,7 @@ with open("README.md", "r") as fh:
 extras_require = {
     # Test dependencies
     'tests': [
-        'pylint < 1.7.0',  # TODO: Why a maximum?
+        'pylint',
         'pytest-cov >= 1.8.0',
         'dnslib >= 0.9.7',
         'requests-mock >= 1.0.0',
@@ -40,7 +40,7 @@ setuptools.setup(
         'acme >= 0.25.1, < 0.26.0',  # TODO: Why a maximum?
         'cryptography >= 1.7.1',
         'dnspython >= 1.15.0',
-        'flask >= 0.12.1, < 1.0.0',  # TODO: Why a maximum?
+        'flask >= 0.12.1',
         'josepy >= 1.0.1',
         'pyOpenSSL >= 16.2.0',
         'requests >= 2.18.4',

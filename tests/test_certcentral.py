@@ -14,8 +14,8 @@ from certcentral.acme_requests import (ACMEAccount, ACMEChallengeType,
                                        DNS01ACMEChallenge)
 from certcentral.certcentral import (DEFAULT_DNS_ZONE_UPDATE_CMD,
                                      DEFAULT_DNS_ZONE_UPDATE_CMD_TIMEOUT,
-                                     KEY_TYPES, CertCentral, CertCentralConfig,
-                                     CertificateStatus)
+                                     KEY_TYPES, CERTIFICATE_TYPES, CertCentral,
+                                     CertCentralConfig, CertificateStatus)
 from certcentral.x509 import (Certificate, CertificateSaveMode, ECPrivateKey,
                               PrivateKeyLoader, X509Error)
 from tests.test_pebble import (BaseDNSRequestHandler,
@@ -173,7 +173,8 @@ class CertCentralTest(unittest.TestCase):
         create_initial_certs_mock.assert_called_once()
 
     @mock.patch('certcentral.certcentral.SelfSignedCertificate')
-    def test_create_initial_tests(self, self_signed_cert_mock):
+    @mock.patch('certcentral.certcentral.Certificate')
+    def test_create_initial_tests(self, cert_mock, self_signed_cert_mock):
         self.instance.cert_status = {'test_certificate': {
             'ec-prime256v1': CertificateStatus.VALID,
             'rsa-2048': CertificateStatus.INITIAL,
@@ -186,6 +187,8 @@ class CertCentralTest(unittest.TestCase):
         rsa_key = deepcopy(KEY_TYPES['rsa-2048'])
         rsa_key['class'] = rsa_key_mock
 
+        self_signed_cert_pem = b'-----BEGIN CERTIFICATE-----\nMIIBLjCB1qADAgECAhRxJCFPZ3GhYbLItsUmpIoJSJYR5zAKBggqhkjOPQQDAjAY\nMRYwFAYDVQQDDA1TbmFrZW9pbCBjZXJ0MB4XDTE4MDkwODAwNTQwMVoXDTE4MDkx\nMTAwNTQwMVowGDEWMBQGA1UEAwwNU25ha2VvaWwgY2VydDBZMBMGByqGSM49AgEG\nCCqGSM49AwEHA0IABDqt32diDH9nQxqFRq6v6KKiHqYMHtV17NaRx5MZaYa+W1kV\nfHYsaDgturMPH0mHgwyOIxeDsunNxQ9l9Ky/wPUwCgYIKoZIzj0EAwIDRwAwRAIg\nDKvGUasaWse5Lmv4vK+LuSxOt6bS/R2yqOML+9p1xk8CIHApbLL1bb2M2olXzPOE\ntgBTOv5Voi32fqjBMgXMh/Yd\n-----END CERTIFICATE-----\n'
+        type(self_signed_cert_mock.return_value).pem = mock.PropertyMock(return_value=self_signed_cert_pem)
         with mock.patch.dict('certcentral.certcentral.KEY_TYPES', {'ec-prime256v1': ec_key, 'rsa-2048': rsa_key}):
             self.instance.create_initial_certs()
 
@@ -206,10 +209,18 @@ class CertCentralTest(unittest.TestCase):
         self.assertFalse(kwargs['sans'])
         self.assertEqual(kwargs['private_key'], rsa_key_mock.return_value)
         self.assertLess(kwargs['until_date'] - kwargs['from_date'], timedelta(days=7))
-        self_signed_cert_mock.assert_has_calls([mock.call().save(self.instance._get_path('test_certificate',
-                                                                                         'rsa-2048',
-                                                                                         public=True,
-                                                                                         kind='live'))])
+        cert_mock.assert_has_calls([mock.call(self_signed_cert_pem)] + [
+            mock.call().save(
+                self.instance._get_path('test_certificate',
+                                        'rsa-2048',
+                                        public=True,
+                                        kind='live',
+                                        cert_type=cert_type
+                ),
+                mode=cert_type_details['save_mode']
+            )
+            for cert_type, cert_type_details in CERTIFICATE_TYPES.items()
+        ])
 
     @mock.patch.object(ACMEAccount, 'load')
     @mock.patch('certcentral.certcentral.ACMERequests')
@@ -260,7 +271,10 @@ class CertCentralTest(unittest.TestCase):
                       DNS01ACMEChallenge('_acme-challenge.wmflabs.test', 'fake-challenge2')]
         ret_value = self.instance._trigger_dns_zone_update(challenges)
         self.assertTrue(ret_value)
-        params = []
+        params = ['--remote-servers']
+        params += self.instance.config.challenges[ACMEChallengeType.DNS01]['sync_dns_servers']
+        params += ['--']
+
         for challenge in challenges:
             params.append(challenge.validation_domain_name)
             params.append(challenge.validation)
@@ -271,6 +285,23 @@ class CertCentralTest(unittest.TestCase):
                                                 stderr=subprocess.DEVNULL,
                                                 stdout=subprocess.DEVNULL,
                                                 timeout=timeout)
+
+    @mock.patch('subprocess.check_call')
+    def test_update_dns_zone_hyphens(self, check_call_mock):
+        """
+        This ensures that if challenges begin with hyphen they do not appear in the DNS zone
+        update command before the double hyphen, to prevent them being misinterpreted.
+        """
+        challenges = [DNS01ACMEChallenge('_acme-challenge.wmflabs.test', '-fake-challenge1'),
+                      DNS01ACMEChallenge('_acme-challenge.wmflabs.test', '-fake-challenge2')]
+        self.instance._trigger_dns_zone_update(challenges)
+        args, _ = check_call_mock.call_args
+        self.assertEqual(len(args), 1)
+        params, = args
+
+        self.assertIn('--', params)
+        for check_param in params[:params.index('--')]:
+            self.assertNotIn(check_param, ['-fake-challenge1', '-fake-challenge2'])
 
     @mock.patch('subprocess.check_call')
     def test_update_dns_zone_timeout(self, check_call_mock):
@@ -620,7 +651,7 @@ class CertCentralDetermineStatusTest(unittest.TestCase):
                 'test_certificate':
                 {
                     'CN': 'certcentraltest.beta.wmflabs.org',
-                    'SNI': ['certcentraltest.beta.wmflabs.org'],
+                    'SNI': ['certcentraltest.alpha.wmflabs.org', 'certcentraltest.beta.wmflabs.org'],
                     'challenge': 'http-01',
                 },
             },
@@ -651,6 +682,10 @@ class CertCentralDetermineStatusTest(unittest.TestCase):
             return_value.certificate.not_valid_after = datetime.utcnow() + timedelta(days=10)
             return_value.needs_renew.return_value = False
 
+        return_value.common_name = 'certcentraltest.beta.wmflabs.org'
+        return_value.subject_alternative_names = ['certcentraltest.alpha.wmflabs.org',
+                                                  'certcentraltest.beta.wmflabs.org']
+
         return return_value
 
     @mock.patch.object(Certificate, 'load')
@@ -675,6 +710,80 @@ class CertCentralDetermineStatusTest(unittest.TestCase):
                 for cert_status in status[certificate].values():
                     self.assertEqual(cert_status, test_status)
 
+    @mock.patch.object(Certificate, 'load')
+    def test_trigger_subjects_changed_status(self, load_mock):
+
+        def _generate_return_values():
+            return_value = mock.MagicMock()
+            return_value.self_signed = False
+            return_value.needs_renew.return_value = False
+            return_value.certificate.not_valid_after = datetime.utcnow() + timedelta(days=10)
+            return_value.common_name = 'certcentraltest.beta.wmflabs.org'
+
+            for san in ([], ['certcentraltest.beta.wmflabs.org', 'certcentraltest.gamma.wmflabs.org'],
+                        ['certcentraltest.alpha.wmflabs.org']):
+                return_value.subject_alternative_names = san
+                yield return_value
+
+            return_value.common_name = 'certcentraltest.alpha.wmflabs.org'
+            return_value.subject_alternative_names = ['certcentraltest.beta.wmflabs.org']
+            yield return_value
+
+
+        for load_mock_instance in _generate_return_values():
+            load_mock.reset_mock()
+            load_mock.return_value = load_mock_instance
+
+            status = self.instance._set_cert_status()
+            load_calls = [mock.call(self.instance._get_path('test_certificate', 'ec-prime256v1',
+                                                    public=True, kind='live')),
+                        mock.call(self.instance._get_path('test_certificate', 'rsa-2048',
+                                                    public=True, kind='live')),
+                        ]
+            load_mock.assert_has_calls(load_calls, any_order=True)
+            self.assertEqual(len(status), len(self.instance.config.certificates))
+            for certificate in self.instance.config.certificates:
+                self.assertEqual(len(status[certificate]), len(KEY_TYPES))
+                for cert_status in status[certificate].values():
+                    self.assertEqual(cert_status, CertificateStatus.SUBJECTS_CHANGED)
+
+    @mock.patch.object(Certificate, 'load')
+    def test_shouldnt_trigger_subjects_changed_status(self, load_mock):
+
+        def _generate_return_values():
+            return_value = mock.MagicMock()
+            return_value.self_signed = False
+            return_value.needs_renew.return_value = False
+            return_value.certificate.not_valid_after = datetime.utcnow() + timedelta(days=10)
+            return_value.common_name = 'certcentraltest.BETA.wmflabs.org'
+            return_value.subject_alternative_names = ['certcentraltest.alpha.wmflabs.org',
+                                                      'certcentraltest.beta.wmflabs.org']
+            yield return_value
+
+            return_value.common_name = 'certcentraltest.beta.wmflabs.org'
+            for san in (['certcentraltest.alpha.wmflabs.org',  'certcentraltest.BETA.wmflabs.org'],
+                        ['certcentraltest.beta.wmflabs.org', 'certcentraltest.alpha.wmflabs.org'],
+                        ['certcentraltest.beta.wmflabs.org', 'certcentraltest.alpha.wmflabs.org',
+                         'certcentraltest.alpha.wmflabs.org']):
+                return_value.subject_alternative_names = san
+                yield return_value
+
+        for load_mock_instance in _generate_return_values():
+            load_mock.reset_mock()
+            load_mock.return_value = load_mock_instance
+
+            status = self.instance._set_cert_status()
+            load_calls = [mock.call(self.instance._get_path('test_certificate', 'ec-prime256v1',
+                                                    public=True, kind='live')),
+                        mock.call(self.instance._get_path('test_certificate', 'rsa-2048',
+                                                    public=True, kind='live')),
+                        ]
+            load_mock.assert_has_calls(load_calls, any_order=True)
+            self.assertEqual(len(status), len(self.instance.config.certificates))
+            for certificate in self.instance.config.certificates:
+                self.assertEqual(len(status[certificate]), len(KEY_TYPES))
+                for cert_status in status[certificate].values():
+                    self.assertEqual(cert_status, CertificateStatus.VALID)
 
 
 class CertCentralIntegrationTest(BasePebbleIntegrationTest):
@@ -897,7 +1006,7 @@ class CertCentralIntegrationTest(BasePebbleIntegrationTest):
     @mock.patch('signal.signal')
     @mock.patch.object(CertCentral, 'sighup_handler')
     @mock.patch('certcentral.certcentral.sleep', side_effect=InfiniteLoopBreaker)
-    def test_certificate_management(self, a, b, c):
+    def test_certificate_management_with_config_change(self, a, b, c):
         # Step 1 - create an ACME account
         account = ACMEAccount.create('tests-certcentral@wikimedia.org',
                                      base_path=self.acme_account_base_path,
@@ -941,4 +1050,26 @@ class CertCentralIntegrationTest(BasePebbleIntegrationTest):
             for key_type_id in KEY_TYPES:
                 self.assertEqual(cert_central.cert_status[cert_id][key_type_id], CertificateStatus.VALID)
                 cert = Certificate.load(cert_central._get_path(cert_id, key_type_id, public=True, kind='live'))
+                self.assertEqual(cert.subject_alternative_names, ['certcentraltest.beta.wmflabs.org'])
+                self.assertFalse(cert.self_signed)
+
+        # Step 5 - Add a new SNI
+        cert_central.config.certificates['test_certificate']['SNI'].append('certcentraltest.alpha.wmflabs.org')
+
+        # Step 6 - Trigger certificate status evaluation
+        cert_central.cert_status = cert_central._set_cert_status()
+        for cert_id in cert_central.cert_status:
+            for key_type_id in KEY_TYPES:
+                self.assertEqual(cert_central.cert_status[cert_id][key_type_id], CertificateStatus.SUBJECTS_CHANGED)
+
+        # Step 7 - Run another iteration of certificate management
+        with self.assertRaises(InfiniteLoopBreaker):
+            cert_central.certificate_management()
+
+        for cert_id in cert_central.cert_status:
+            for key_type_id in KEY_TYPES:
+                self.assertEqual(cert_central.cert_status[cert_id][key_type_id], CertificateStatus.VALID)
+                cert = Certificate.load(cert_central._get_path(cert_id, key_type_id, public=True, kind='live'))
+                self.assertEqual(cert.subject_alternative_names, ['certcentraltest.beta.wmflabs.org',
+                                                                  'certcentraltest.alpha.wmflabs.org'])
                 self.assertFalse(cert.self_signed)

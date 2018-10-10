@@ -362,7 +362,7 @@ class ACMERequests:
             finished_order = self.acme_client.poll_and_finalize(order, deadline=deadline)
         except errors.TimeoutError:
             # TimeoutError is raised if the challenges have not been validated yet
-            return
+            return None
         except errors.ValidationError:
             self._clean(csr_id)
             raise ACMEInvalidChallengeError('Unable to get certificate')

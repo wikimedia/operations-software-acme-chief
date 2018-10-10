@@ -24,7 +24,7 @@ DEFAULT_RSA_PUBLIC_EXPONENT = 65537
 DEFAULT_SIGNATURE_ALGORITHM = hashes.SHA256()
 DEFAULT_EC_CURVE = ec.SECP256R1  # pylint: disable=invalid-name
 DEFAULT_RENEWAL_PERIOD = timedelta(days=30)
-OPENER_MODE = 0o600
+OPENER_MODE = 0o640
 PEM_HEADER_AND_FOOTER_LEN = 52
 
 
@@ -67,7 +67,7 @@ def secure_opener(path, flags):
     return os.open(path, flags, OPENER_MODE)
 
 
-class PrivateKeyLoader(object):
+class PrivateKeyLoader():
     """PrivateKey factory that reads an existing key from disk"""
     @staticmethod
     def load(filename):
@@ -76,7 +76,7 @@ class PrivateKeyLoader(object):
         only allow access to the owner of the file
         """
         key_stat = os.stat(filename)
-        if key_stat.st_mode & (stat.S_IRWXG | stat.S_IRWXO):
+        if key_stat.st_mode & (stat.S_IWGRP | stat.S_IXGRP | stat.S_IRWXO):
             raise X509Error("permissions ({:o}) are too open for {}".format(stat.S_IMODE(key_stat.st_mode), filename))
 
         with open(filename, 'rb') as key_file:
@@ -87,10 +87,9 @@ class PrivateKeyLoader(object):
             )
             if isinstance(private_key, rsa.RSAPrivateKey):
                 return RSAPrivateKey(private_key=private_key)
-            elif isinstance(private_key, ec.EllipticCurvePrivateKey):
+            if isinstance(private_key, ec.EllipticCurvePrivateKey):
                 return ECPrivateKey(private_key=private_key)
-            else:
-                raise NotImplementedError("Unsupported private key type")
+            raise NotImplementedError("Unsupported private key type")
 
 
 class PrivateKey(abc.ABC):
@@ -159,7 +158,7 @@ class ECPrivateKey(PrivateKey):
         )
 
 
-class BaseX509Builder(object):
+class BaseX509Builder():
     """
     Base class for CSR and SelfSignedCertificate classes. It centralizes common stuff:
         - common name
@@ -315,8 +314,28 @@ class Certificate:
         """Returns True if the certificate is self signed, False otherwise"""
         return self.certificate.issuer == self.certificate.subject
 
+    @property
+    def common_name(self):
+        """Gets the Common Name (CN) of this certificate"""
+        name_attrs = self.certificate.subject.get_attributes_for_oid(NameOID.COMMON_NAME)
+        if not name_attrs:
+            raise X509Error('Unable to get the Common Name of the certificate')
+        if len(name_attrs) > 1:
+            raise X509Error('Unexpected number of common name attributes')
+
+        return name_attrs[0].value
+
+    @property
+    def subject_alternative_names(self):
+        """Gets the subject alternative names in this certificate, as a list of strings"""
+        try:
+            san_ext = self.certificate.extensions.get_extension_for_class(crypto_x509.SubjectAlternativeName)
+        except crypto_x509.ExtensionNotFound:  # no SANs
+            return []
+        return [v.value for v in san_ext.value]
+
     def save(self, path, mode=CertificateSaveMode.CERT_ONLY):
-        """Persists the certificate on disk serializad as a PEM"""
+        """Persists the certificate on disk serialized as a PEM"""
         if mode is CertificateSaveMode.CERT_ONLY:
             save_chain = self.chain[0:1]
         elif mode is CertificateSaveMode.CHAIN_ONLY:

@@ -5,3 +5,4 @@ etc/certcentral/live_certs
 etc/certcentral/http_challenges
 etc/certcentral/dns_challenges
 etc/certcentral/csrs
+etc/certcentral/accounts

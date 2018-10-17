@@ -17,7 +17,7 @@ case "$1" in
         echo "Error: certcentral group does not exist" >&2
         exit 1
     fi
-    chown certcentral:certcentral /etc/certcentral /etc/certcentral/new_certs /etc/certcentral/live_certs /etc/certcentral/http_challenges /etc/certcentral/dns_challenges /etc/certcentral/csrs
+    chown certcentral:certcentral /etc/certcentral /etc/certcentral/new_certs /etc/certcentral/live_certs /etc/certcentral/http_challenges /etc/certcentral/dns_challenges /etc/certcentral/csrs /etc/certcentral/accounts
 
     if ! getent passwd www-data > /dev/null; then
         echo "Error: www-data user does not exist" >&2

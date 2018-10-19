@@ -1,5 +1,6 @@
 Source: certcentral
-Maintainer: Alex Monk <krenair@gmail.com>, Valentin Gutierrez <vgutierrez@wikimedia.org>
+Maintainer: Alex Monk <krenair@gmail.com>
+Uploaders: Valentin Gutierrez <vgutierrez@wikimedia.org>
 Section: python
 Priority: optional
 Build-Depends: python3-setuptools, python3-all, debhelper (>= 10), dh-exec, dh-python

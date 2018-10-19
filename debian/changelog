@@ -1,3 +1,9 @@
+certcentral (0.2-1) stretch-wikimedia; urgency=medium
+
+  Allow verification DNS servers to be specified with hostnames.
+
+ -- Valentin Gutierrez <vgutierrez@wikimedia.org>  Fri, 19 Oct 2018 13:38:14 +0100
+
 certcentral (0.1-2) stretch-wikimedia; urgency=medium
 
   Add missing /etc/certcentral/accounts directory.

@@ -8,6 +8,7 @@ import abc
 import hashlib
 import logging
 import os
+import socket
 from collections import defaultdict
 from datetime import datetime, timedelta
 from enum import Enum
@@ -97,13 +98,29 @@ class DNS01ACMEChallenge(BaseACMEChallenge):
         self.validation_domain_name = validation_domain_name
         self.file_name = "{}-{}".format(validation_domain_name, validation)
 
+    @staticmethod
+    def _resolve_dns_servers(dns_servers):
+        """Use system resolver to attempt to resolve DNS servers specified as hostnames"""
+        ret = []
+        for dns_server in dns_servers:
+            addresses_info = socket.getaddrinfo(dns_server, 53, proto=socket.IPPROTO_UDP)
+            for _, _, _, _, sockaddr in addresses_info:
+                ret.append(sockaddr[0])
+
+        return ret
+
     def validate(self, **kwargs):
         logger.debug("Attempting to validate challenge %s", self)
         resolver = dns.resolver.Resolver()
         resolver.port = DNS_PORT
         dns_servers = kwargs.get('dns_servers', DNS_SERVERS)
         if dns_servers is not None:
-            resolver.nameservers = dns_servers
+            try:
+                resolver.nameservers = self._resolve_dns_servers(dns_servers)
+            except OSError:
+                logger.exception("Unable to resolve configured dns servers %s. Using system DNS servers as fallback",
+                                 dns_servers)
+
         resolver.timeout = kwargs.get('timeout', DEFAULT_DNS01_VALIDATION_TIMEOUT)
         resolver.lifetime = kwargs.get('timeout', DEFAULT_DNS01_VALIDATION_TIMEOUT)
 

@@ -907,7 +907,7 @@ class CertCentralIntegrationTest(BasePebbleIntegrationTest):
             },
             challenges={
                 'dns-01': {
-                    'validation_dns_servers': ['127.0.0.1'],
+                    'validation_dns_servers': ['localhost', '127.0.0.1'],
                     'sync_dns_servers': ['127.0.0.1'],
                 }
             }

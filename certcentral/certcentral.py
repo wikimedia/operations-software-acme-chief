@@ -120,6 +120,63 @@ class CertificateStatus(Enum):
     SUBJECTS_CHANGED = 9      # Configuration of cert (CN/SANs) has changed, need to re-issue
 
 
+class CertificateState:
+    """
+    CertificateState tracks the current status of a certificate and the number of retries performed to
+    reach CertificateStatus.VALID status. After MAX_CONSECUTIVE_RETRIES it will apply an exponential backoff
+    """
+    STATUS_WITH_RETRIES = (CertificateStatus.CSR_PUSHED, CertificateStatus.CHALLENGES_VALIDATED,
+                           CertificateStatus.CHALLENGES_PUSHED)
+    MAX_CONSECUTIVE_RETRIES = 3
+    MAX_RETRIES = 16
+
+    def __init__(self, status):
+        self._status = status
+        self._retries = 0
+        self._next_retry = datetime.datetime.fromtimestamp(0)
+
+    @property
+    def next_retry(self):
+        """When should be performed the next retry. None if retries must be stopped"""
+        return self._next_retry
+
+    @property
+    def retries(self):
+        """Number of retries already attempted without reaching the VALID status"""
+        return self._retries
+
+    @property
+    def retry(self):
+        """True if the retry can be performed. False otherwise"""
+        if self._next_retry is not None and datetime.datetime.utcnow() > self._next_retry:
+            return True
+
+        return False
+
+    @property
+    def status(self):
+        """Current status"""
+        return self._status
+
+    @status.setter
+    def status(self, value):
+        self._status = value
+
+        if value not in CertificateState.STATUS_WITH_RETRIES:
+            self._retries = 0
+            self._next_retry = datetime.datetime.fromtimestamp(0)
+            return
+
+        self._retries += 1
+
+        if self._retries > CertificateState.MAX_RETRIES:
+            self._next_retry = None
+        elif self._retries > CertificateState.MAX_CONSECUTIVE_RETRIES:
+            self._next_retry = datetime.datetime.utcnow() + datetime.timedelta(seconds=2**self.retries)
+        else:
+            self._next_retry = datetime.datetime.fromtimestamp(0)
+
+
 class CertCentralConfig:
     """Class representing CertCentral configuration"""
     def __init__(self, *, accounts, certificates, default_account, authorized_hosts, challenges):
@@ -245,7 +302,7 @@ class CertCentral():
         """
         Figures out the current status for every configured certificate
         """
-        status = collections.defaultdict(dict)
+        state = collections.defaultdict(dict)
 
         def _get_certificate_status(cert_id, key_type_id, certificate):
             if certificate.self_signed is True:
@@ -291,11 +348,13 @@ class CertCentral():
 
                 try:
                     certificate = Certificate.load(self._get_path(cert_id, key_type_id, public=True, kind='live'))
-                    status[cert_id][key_type_id] = _get_certificate_status(cert_id, key_type_id, certificate)
+                    new_status = _get_certificate_status(cert_id, key_type_id, certificate)
                 except (OSError, X509Error):
-                    status[cert_id][key_type_id] = CertificateStatus.INITIAL
+                    new_status = CertificateStatus.INITIAL
 
-        return status
+                state[cert_id][key_type_id] = CertificateState(new_status)
+
+        return state
 
     def run(self):
         """
@@ -323,7 +382,7 @@ class CertCentral():
         """
         for cert_id in self.cert_status:
             for key_type_id, key_type_details in KEY_TYPES.items():
-                if self.cert_status[cert_id][key_type_id] != CertificateStatus.INITIAL:
+                if self.cert_status[cert_id][key_type_id].status != CertificateStatus.INITIAL:
                     continue
 
                 logger.info("Creating initial self-signed certificate for %s / %s", cert_id, key_type_id)
@@ -341,7 +400,7 @@ class CertCentral():
                 for cert_type, cert_type_details in CERTIFICATE_TYPES.items():
                     path = self._get_path(cert_id, key_type_id, public=True, kind='live', cert_type=cert_type)
                     cert.save(path, mode=cert_type_details['save_mode'])
-                self.cert_status[cert_id][key_type_id] = CertificateStatus.SELF_SIGNED
+                self.cert_status[cert_id][key_type_id].status = CertificateStatus.SELF_SIGNED
 
     def _get_acme_session(self, cert_details):
         acme_account_id = cert_details.get('account', self.config.default_account)
@@ -590,23 +649,26 @@ class CertCentral():
         while True:
             for cert_id in self.cert_status:
                 for key_type_id in KEY_TYPES:
-                    cert_status = self.cert_status[cert_id][key_type_id]
-                    if cert_status is CertificateStatus.VALID:
+                    cert_state = self.cert_status[cert_id][key_type_id]
+                    if not cert_state.retry:
+                        logger.debug("Skipping certificate %s till at least %s", cert_id, cert_state.next_retry)
                         continue
-                    elif cert_status in (CertificateStatus.SELF_SIGNED,
-                                         CertificateStatus.NEEDS_RENEWAL,
-                                         CertificateStatus.EXPIRED,
-                                         CertificateStatus.SUBJECTS_CHANGED):
+                    if cert_state.status is CertificateStatus.VALID:
+                        continue
+                    elif cert_state.status in (CertificateStatus.SELF_SIGNED,
+                                               CertificateStatus.NEEDS_RENEWAL,
+                                               CertificateStatus.EXPIRED,
+                                               CertificateStatus.SUBJECTS_CHANGED):
                         new_status = self._new_certificate(cert_id, key_type_id)
-                    elif cert_status is CertificateStatus.CSR_PUSHED:
+                    elif cert_state.status is CertificateStatus.CSR_PUSHED:
                         new_status = self._handle_pushed_csr(cert_id, key_type_id)
-                    elif cert_status is CertificateStatus.CHALLENGES_PUSHED:
+                    elif cert_state.status is CertificateStatus.CHALLENGES_PUSHED:
                         new_status = self._handle_pushed_challenges(cert_id, key_type_id)
                     else:
-                        logger.error("Unexpected state: %s", cert_status)
+                        logger.error("Unexpected state: %s", cert_state.status)
                         continue
 
-                    self.cert_status[cert_id][key_type_id] = new_status
+                    self.cert_status[cert_id][key_type_id].status = new_status
             sleep(5)
 
 

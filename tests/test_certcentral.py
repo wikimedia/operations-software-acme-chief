@@ -12,10 +12,11 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from certcentral.acme_requests import (ACMEAccount, ACMEChallengeType,
                                        ACMEChallengeValidation, ACMEError,
                                        DNS01ACMEChallenge)
-from certcentral.certcentral import (DEFAULT_DNS_ZONE_UPDATE_CMD,
+from certcentral.certcentral import (CERTIFICATE_TYPES,
+                                     DEFAULT_DNS_ZONE_UPDATE_CMD,
                                      DEFAULT_DNS_ZONE_UPDATE_CMD_TIMEOUT,
-                                     KEY_TYPES, CERTIFICATE_TYPES, CertCentral,
-                                     CertCentralConfig, CertificateStatus)
+                                     KEY_TYPES, CertCentral, CertCentralConfig,
+                                     CertificateState, CertificateStatus)
 from certcentral.x509 import (Certificate, CertificateSaveMode, ECPrivateKey,
                               PrivateKeyLoader, X509Error)
 from tests.test_pebble import (BaseDNSRequestHandler,
@@ -124,6 +125,58 @@ class CertCentralConfigTest(unittest.TestCase):
         self.assertEqual(config.default_account, '621b49f9c6ccbbfbff9acb6e18f71205')
 
 
+class CertificateStateTest(unittest.TestCase):
+    def setUp(self):
+        self.state = CertificateState(CertificateStatus.INITIAL)
+
+    def test_init(self):
+        self.assertIs(self.state.status, CertificateStatus.INITIAL)
+        self.assertEqual(self.state.retries, 0)
+        self.assertGreaterEqual(datetime.utcnow(), self.state.next_retry)
+
+    def test_set(self):
+        for attribute in ('retries', 'next_retry'):
+            with self.assertRaises(AttributeError) as context:
+                self.state.__setattr__(attribute, 1)
+
+            self.assertIn("can't set attribute", str(context.exception))
+
+    def test_set_status_without_retries(self):
+        for status in (CertificateStatus.INITIAL, CertificateStatus.SELF_SIGNED, CertificateStatus.VALID,
+                       CertificateStatus.NEEDS_RENEWAL, CertificateStatus.EXPIRED, CertificateStatus.SUBJECTS_CHANGED):
+            self.state.status = status
+            self.assertEqual(self.state.retries, 0)
+            self.assertGreaterEqual(datetime.utcnow(), self.state.next_retry)
+            self.assertTrue(self.state.retry)
+
+    def test_set_status_with_retries(self):
+        for status in CertificateState.STATUS_WITH_RETRIES:
+            self.state.status = CertificateStatus.INITIAL  # force setting number of retries to 0
+            self.assertEqual(self.state.retries, 0)        # sanity check
+
+            for _ in range(CertificateState.MAX_CONSECUTIVE_RETRIES):
+                current_retries = self.state.retries
+                self.state.status = status
+                self.assertEqual(self.state.retries, current_retries+1)
+                self.assertGreater(datetime.utcnow(), self.state.next_retry)
+                self.assertTrue(self.state.retry)
+
+            self.assertEqual(self.state.retries, CertificateState.MAX_CONSECUTIVE_RETRIES)  # sanity check
+            for _ in range(self.state.retries, CertificateState.MAX_RETRIES):
+                current_retries = self.state.retries
+                self.state.status = status
+                self.assertEqual(self.state.retries, current_retries+1)
+                self.assertAlmostEqual(self.state.next_retry, datetime.utcnow() +
+                                       timedelta(seconds=2**(current_retries+1)),
+                                       delta=timedelta(seconds=1))
+                self.assertFalse(self.state.retry)
+
+            self.assertEqual(self.state.retries, CertificateState.MAX_RETRIES)  # sanity check
+            self.state.status = status
+            self.assertIsNone(self.state.next_retry)
+            self.assertFalse(self.state.retry)
+
+
 class CertCentralTest(unittest.TestCase):
     @mock.patch('signal.signal')
     @mock.patch.object(CertCentral, 'sighup_handler')
@@ -176,8 +229,8 @@ class CertCentralTest(unittest.TestCase):
     @mock.patch('certcentral.certcentral.Certificate')
     def test_create_initial_tests(self, cert_mock, self_signed_cert_mock):
         self.instance.cert_status = {'test_certificate': {
-            'ec-prime256v1': CertificateStatus.VALID,
-            'rsa-2048': CertificateStatus.INITIAL,
+            'ec-prime256v1': CertificateState(CertificateStatus.VALID),
+            'rsa-2048': CertificateState(CertificateStatus.INITIAL),
         }}
 
         ec_key_mock = mock.MagicMock()
@@ -323,8 +376,8 @@ class CertCentralTest(unittest.TestCase):
                        CertificateStatus.NEEDS_RENEWAL,
                        CertificateStatus.EXPIRED]:
             self.instance.cert_status = {'test_certificate': {
-                'ec-prime256v1': status,
-                'rsa-2048': status,
+                'ec-prime256v1': CertificateState(status),
+                'rsa-2048': CertificateState(status),
             }}
             with mock.patch('certcentral.certcentral.sleep', side_effect=InfiniteLoopBreaker) as sleep_mock:
                 with mock.patch.object(self.instance, '_new_certificate') as new_certificate_mock:
@@ -336,11 +389,11 @@ class CertCentralTest(unittest.TestCase):
 
             for key_type_id, cert_status in self.instance.cert_status['test_certificate'].items():
                 new_certificate_mock.assert_any_call('test_certificate', key_type_id)
-                self.assertEqual(cert_status, new_certificate_mock.return_value)
+                self.assertEqual(cert_status.status, new_certificate_mock.return_value)
 
             self.instance.cert_status = {'test_certificate': {
-                'ec-prime256v1': CertificateStatus.CSR_PUSHED,
-                'rsa-2048': CertificateStatus.CSR_PUSHED,
+                'ec-prime256v1': CertificateState(CertificateStatus.CSR_PUSHED),
+                'rsa-2048': CertificateState(CertificateStatus.CSR_PUSHED),
             }}
 
             with mock.patch('certcentral.certcentral.sleep', side_effect=InfiniteLoopBreaker) as sleep_mock:
@@ -353,11 +406,11 @@ class CertCentralTest(unittest.TestCase):
 
             for key_type_id, cert_status in self.instance.cert_status['test_certificate'].items():
                 handle_pushed_csr_mock.assert_any_call('test_certificate', key_type_id)
-                self.assertEqual(cert_status, handle_pushed_csr_mock.return_value)
+                self.assertEqual(cert_status.status, handle_pushed_csr_mock.return_value)
 
             self.instance.cert_status = {'test_certificate': {
-                'ec-prime256v1': CertificateStatus.CHALLENGES_PUSHED,
-                'rsa-2048': CertificateStatus.CHALLENGES_PUSHED,
+                'ec-prime256v1': CertificateState(CertificateStatus.CHALLENGES_PUSHED),
+                'rsa-2048': CertificateState(CertificateStatus.CHALLENGES_PUSHED),
             }}
 
             with mock.patch('certcentral.certcentral.sleep', side_effect=InfiniteLoopBreaker) as sleep_mock:
@@ -370,7 +423,7 @@ class CertCentralTest(unittest.TestCase):
 
             for key_type_id, cert_status in self.instance.cert_status['test_certificate'].items():
                 handle_pushed_challenges_mock.assert_any_call('test_certificate', key_type_id)
-                self.assertEqual(cert_status, handle_pushed_challenges_mock.return_value)
+                self.assertEqual(cert_status.status, handle_pushed_challenges_mock.return_value)
 
 
 class CertCentralStatusTransitionTests(unittest.TestCase):
@@ -708,7 +761,7 @@ class CertCentralDetermineStatusTest(unittest.TestCase):
             for certificate in self.instance.config.certificates:
                 self.assertEqual(len(status[certificate]), len(KEY_TYPES))
                 for cert_status in status[certificate].values():
-                    self.assertEqual(cert_status, test_status)
+                    self.assertEqual(cert_status.status, test_status)
 
     @mock.patch.object(Certificate, 'load')
     def test_trigger_subjects_changed_status(self, load_mock):
@@ -745,7 +798,7 @@ class CertCentralDetermineStatusTest(unittest.TestCase):
             for certificate in self.instance.config.certificates:
                 self.assertEqual(len(status[certificate]), len(KEY_TYPES))
                 for cert_status in status[certificate].values():
-                    self.assertEqual(cert_status, CertificateStatus.SUBJECTS_CHANGED)
+                    self.assertEqual(cert_status.status, CertificateStatus.SUBJECTS_CHANGED)
 
     @mock.patch.object(Certificate, 'load')
     def test_shouldnt_trigger_subjects_changed_status(self, load_mock):
@@ -783,7 +836,7 @@ class CertCentralDetermineStatusTest(unittest.TestCase):
             for certificate in self.instance.config.certificates:
                 self.assertEqual(len(status[certificate]), len(KEY_TYPES))
                 for cert_status in status[certificate].values():
-                    self.assertEqual(cert_status, CertificateStatus.VALID)
+                    self.assertEqual(cert_status.status, CertificateStatus.VALID)
 
 
 class CertCentralIntegrationTest(BasePebbleIntegrationTest):
@@ -860,15 +913,15 @@ class CertCentralIntegrationTest(BasePebbleIntegrationTest):
             }
         )
         cert_central.cert_status = {'test_certificate': {
-            'ec-prime256v1': CertificateStatus.INITIAL,
-            'rsa-2048': CertificateStatus.INITIAL,
+            'ec-prime256v1': CertificateState(CertificateStatus.INITIAL),
+            'rsa-2048': CertificateState(CertificateStatus.INITIAL),
         }}
 
         # Step 3 - Generate self signed certificates
         cert_central.create_initial_certs()
         for cert_id in cert_central.cert_status:
             for key_type_id in KEY_TYPES:
-                self.assertEqual(cert_central.cert_status[cert_id][key_type_id], CertificateStatus.SELF_SIGNED)
+                self.assertEqual(cert_central.cert_status[cert_id][key_type_id].status, CertificateStatus.SELF_SIGNED)
                 cert = Certificate.load(cert_central._get_path(cert_id, key_type_id, public=True, kind='live'))
                 self.assertTrue(cert.self_signed)
 
@@ -913,15 +966,15 @@ class CertCentralIntegrationTest(BasePebbleIntegrationTest):
             }
         )
         cert_central.cert_status = {'test_certificate': {
-            'ec-prime256v1': CertificateStatus.INITIAL,
-            'rsa-2048': CertificateStatus.INITIAL,
+            'ec-prime256v1': CertificateState(CertificateStatus.INITIAL),
+            'rsa-2048': CertificateState(CertificateStatus.INITIAL),
         }}
 
         # Step 3 - Generate self signed certificates
         cert_central.create_initial_certs()
         for cert_id in cert_central.cert_status:
             for key_type_id in KEY_TYPES:
-                self.assertEqual(cert_central.cert_status[cert_id][key_type_id], CertificateStatus.SELF_SIGNED)
+                self.assertEqual(cert_central.cert_status[cert_id][key_type_id].status, CertificateStatus.SELF_SIGNED)
                 cert = Certificate.load(cert_central._get_path(cert_id, key_type_id, public=True, kind='live'))
                 self.assertTrue(cert.self_signed)
 
@@ -966,15 +1019,15 @@ class CertCentralIntegrationTest(BasePebbleIntegrationTest):
             }
         )
         cert_central.cert_status = {'test_certificate': {
-            'ec-prime256v1': CertificateStatus.INITIAL,
-            'rsa-2048': CertificateStatus.INITIAL,
+            'ec-prime256v1': CertificateState(CertificateStatus.INITIAL),
+            'rsa-2048': CertificateState(CertificateStatus.INITIAL),
         }}
 
         # Step 3 - Generate self signed certificates
         cert_central.create_initial_certs()
         for cert_id in cert_central.cert_status:
             for key_type_id in KEY_TYPES:
-                self.assertEqual(cert_central.cert_status[cert_id][key_type_id], CertificateStatus.SELF_SIGNED)
+                self.assertEqual(cert_central.cert_status[cert_id][key_type_id].status, CertificateStatus.SELF_SIGNED)
                 cert = Certificate.load(cert_central._get_path(cert_id, key_type_id, public=True, kind='live'))
                 self.assertTrue(cert.self_signed)
 
@@ -1036,8 +1089,8 @@ class CertCentralIntegrationTest(BasePebbleIntegrationTest):
             }
         )
         cert_central.cert_status = {'test_certificate': {
-            'ec-prime256v1': CertificateStatus.INITIAL,
-            'rsa-2048': CertificateStatus.INITIAL,
+            'ec-prime256v1': CertificateState(CertificateStatus.INITIAL),
+            'rsa-2048': CertificateState(CertificateStatus.INITIAL),
         }}
 
         # Step 3 - Generate self signed certificates
@@ -1048,7 +1101,7 @@ class CertCentralIntegrationTest(BasePebbleIntegrationTest):
             cert_central.certificate_management()
         for cert_id in cert_central.cert_status:
             for key_type_id in KEY_TYPES:
-                self.assertEqual(cert_central.cert_status[cert_id][key_type_id], CertificateStatus.VALID)
+                self.assertEqual(cert_central.cert_status[cert_id][key_type_id].status, CertificateStatus.VALID)
                 cert = Certificate.load(cert_central._get_path(cert_id, key_type_id, public=True, kind='live'))
                 self.assertEqual(cert.subject_alternative_names, ['certcentraltest.beta.wmflabs.org'])
                 self.assertFalse(cert.self_signed)
@@ -1060,7 +1113,8 @@ class CertCentralIntegrationTest(BasePebbleIntegrationTest):
         cert_central.cert_status = cert_central._set_cert_status()
         for cert_id in cert_central.cert_status:
             for key_type_id in KEY_TYPES:
-                self.assertEqual(cert_central.cert_status[cert_id][key_type_id], CertificateStatus.SUBJECTS_CHANGED)
+                self.assertEqual(cert_central.cert_status[cert_id][key_type_id].status,
+                                 CertificateStatus.SUBJECTS_CHANGED)
 
         # Step 7 - Run another iteration of certificate management
         with self.assertRaises(InfiniteLoopBreaker):
@@ -1068,7 +1122,7 @@ class CertCentralIntegrationTest(BasePebbleIntegrationTest):
 
         for cert_id in cert_central.cert_status:
             for key_type_id in KEY_TYPES:
-                self.assertEqual(cert_central.cert_status[cert_id][key_type_id], CertificateStatus.VALID)
+                self.assertEqual(cert_central.cert_status[cert_id][key_type_id].status, CertificateStatus.VALID)
                 cert = Certificate.load(cert_central._get_path(cert_id, key_type_id, public=True, kind='live'))
                 self.assertEqual(cert.subject_alternative_names, ['certcentraltest.beta.wmflabs.org',
                                                                   'certcentraltest.alpha.wmflabs.org'])

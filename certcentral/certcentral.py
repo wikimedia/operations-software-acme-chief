@@ -33,7 +33,9 @@ from time import sleep
 import yaml
 from cryptography.hazmat.primitives.asymmetric import ec
 
-from certcentral.acme_requests import (ACMEAccount, ACMEChallengeType,
+from certcentral.acme_requests import (ACMEAccount,
+                                       ACMEChallengeNotValidatedError,
+                                       ACMEChallengeType,
                                        ACMEChallengeValidation, ACMEError,
                                        ACMEInvalidChallengeError,
                                        ACMEOrderNotFound, ACMERequests)
@@ -603,19 +605,14 @@ class CertCentral():
         session = self._get_acme_session(cert_details)
         try:
             certificate = session.get_certificate(csr_id)
-        except (ACMEOrderNotFound, ACMEInvalidChallengeError):
+        except ACMEChallengeNotValidatedError:
+            logger.warning("ACME Directory hasn't validated the challenge(s) yet for certificate %s / %s",
+                           cert_id, key_type_id)
+            return CertificateStatus.CHALLENGES_PUSHED
+        except (ACMEOrderNotFound, ACMEInvalidChallengeError, ACMEError):
             logger.exception("Problem getting certificate for certificate %s / %s",
                              cert_id, key_type_id)
             return CertificateStatus.SELF_SIGNED
-        except ACMEError:
-            logger.exception("Problem getting certificate for certificate %s / %s",
-                             cert_id, key_type_id)
-            return CertificateStatus.CHALLENGES_PUSHED
-
-        if certificate is None:
-            logger.warning("Returned certificate is None for certificate %s / %s",
-                           cert_id, key_type_id)
-            return CertificateStatus.CHALLENGES_PUSHED
 
         certificate.save(self._get_path(cert_id, key_type_id, public=True, kind='new', cert_type='full_chain'),
                          mode=CertificateSaveMode.FULL_CHAIN)

@@ -9,7 +9,9 @@ from datetime import datetime, timedelta
 import mock
 from cryptography.hazmat.primitives.asymmetric import ec
 
-from certcentral.acme_requests import (ACMEAccount, ACMEChallengeType,
+from certcentral.acme_requests import (ACMEAccount,
+                                       ACMEChallengeNotValidatedError,
+                                       ACMEChallengeType,
                                        ACMEChallengeValidation, ACMEError,
                                        DNS01ACMEChallenge)
 from certcentral.certcentral import (CERTIFICATE_TYPES,
@@ -656,8 +658,8 @@ class CertCentralStatusTransitionTests(unittest.TestCase):
     @mock.patch.object(PrivateKeyLoader, 'load')
     @mock.patch('certcentral.certcentral.CertificateSigningRequest')
     @mock.patch.object(CertCentral, '_get_acme_session')
-    def test_handle_pushed_challenges_without_cert(self, get_acme_session_mock, csr_mock, pkey_loader_mock):
-        get_acme_session_mock.return_value.get_certificate.return_value = None
+    def test_handle_pushed_challenges_not_validated_yet(self, get_acme_session_mock, csr_mock, pkey_loader_mock):
+        get_acme_session_mock.return_value.get_certificate.side_effect = ACMEChallengeNotValidatedError
         status = self.instance._handle_pushed_challenges('test_certificate', 'rsa-2048')
         self.assertEqual(status, CertificateStatus.CHALLENGES_PUSHED)
         pkey_loader_calls = [mock.call(self.instance._get_path('test_certificate', 'rsa-2048',

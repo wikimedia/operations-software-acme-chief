@@ -10,6 +10,7 @@ from cryptography import x509 as crypto_x509
 from cryptography.x509.oid import ExtensionOID, NameOID
 
 from certcentral.acme_requests import (ACMEAccount, ACMEAccountFiles,
+                                       ACMEChallengeNotValidatedError,
                                        ACMEChallengeType,
                                        ACMEChallengeValidation, ACMERequests,
                                        DNS01ACMEChallenge, HTTP01ACMEChallenge)
@@ -186,12 +187,15 @@ class ACMEIntegrationTests(BasePebbleIntegrationTest):
         self.assertNotIn(ACMEChallengeType.HTTP01, challenges)
 
         session.push_solved_challenges(csr.csr_id)
-        certificate = session.get_certificate(csr.csr_id)
         # pebble adds a random delay on validations, so we need to pull until we
         # get the certificate
-        while certificate is None:
+        while True:
             self.assertTrue(session.orders)
-            certificate = session.get_certificate(csr.csr_id)
+            try:
+                certificate = session.get_certificate(csr.csr_id)
+                break
+            except ACMEChallengeNotValidatedError:
+                pass
         self.assertFalse(session.orders)
         self.assertFalse(certificate.needs_renew())
         self.assertFalse(certificate.self_signed)
@@ -225,10 +229,13 @@ class ACMEIntegrationTests(BasePebbleIntegrationTest):
         self.assertIn(ACMEChallengeType.HTTP01, challenges)
 
         session.push_solved_challenges(csr.csr_id, ACMEChallengeType.HTTP01)
-        certificate = session.get_certificate(csr.csr_id)
-        while certificate is None:
+        while True:
             self.assertTrue(session.orders)
-            certificate = session.get_certificate(csr.csr_id)
+            try:
+                certificate = session.get_certificate(csr.csr_id)
+                break
+            except ACMEChallengeNotValidatedError:
+                pass
         self.assertFalse(session.orders)
         self.assertFalse(certificate.needs_renew())
         self.assertFalse(certificate.self_signed)
@@ -261,10 +268,13 @@ class ACMEIntegrationTests(BasePebbleIntegrationTest):
         self.assertNotIn(ACMEChallengeType.HTTP01, challenges)
 
         session.push_solved_challenges(csr.csr_id)
-        certificate = session.get_certificate(csr.csr_id)
-        while certificate is None:
+        while True:
             self.assertTrue(session.orders)
-            certificate = session.get_certificate(csr.csr_id)
+            try:
+                certificate = session.get_certificate(csr.csr_id)
+                break
+            except ACMEChallengeNotValidatedError:
+                pass
         self.assertFalse(session.orders)
         self.assertFalse(certificate.needs_renew())
         self.assertFalse(certificate.self_signed)

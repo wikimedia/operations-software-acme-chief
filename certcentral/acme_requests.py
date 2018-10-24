@@ -53,6 +53,10 @@ class ACMEInvalidChallengeError(ACMEError):
     """Challenge(s) have been marked as INVALID"""
 
 
+class ACMEChallengeNotValidatedError(ACMEError):
+    """Challenge(s) have not been validated yet by the ACME Directory"""
+
+
 class ACMEAccountFiles(Enum):
     """Files needed to persist an account"""
     KEY = 'private_key.pem'
@@ -379,11 +383,12 @@ class ACMERequests:
             finished_order = self.acme_client.poll_and_finalize(order, deadline=deadline)
         except errors.TimeoutError:
             # TimeoutError is raised if the challenges have not been validated yet
-            return None
+            raise ACMEChallengeNotValidatedError('ACME directory has not been able to validate the challenge(s) yet')
         except errors.ValidationError:
             self._clean(csr_id)
             raise ACMEInvalidChallengeError('Unable to get certificate')
         except errors.Error as finalize_error:
+            self._clean(csr_id)
             raise ACMEError('Unable to get certificate') from finalize_error
 
         try:

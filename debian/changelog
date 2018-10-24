@@ -1,3 +1,10 @@
+certcentral (0.3-1) stretch-wikimedia; urgency=medium
+
+  Track number of retries and apply exponential backoff.
+  Avoid getting stuck on CHALLENGES_PUSHED status.
+
+ -- Valentin Gutierrez <vgutierrez@wikimedia.org>  Wed, 24 Oct 2018 18:51:25 +0200
+
 certcentral (0.2-1) stretch-wikimedia; urgency=medium
 
   Allow verification DNS servers to be specified with hostnames.

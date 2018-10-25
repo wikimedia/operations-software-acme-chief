@@ -116,21 +116,26 @@ class CertificateStatus(Enum):
     CSR_PUSHED = 3            # CSR pushed to the ACME directory and challenges saved on disk
     CHALLENGES_VALIDATED = 4  # Challenges have been successfully validated
     CHALLENGES_PUSHED = 5     # Challenges pushed to the ACME directory
-    VALID = 6                 # Valid certificate
-    NEEDS_RENEWAL = 7         # Valid certificate that needs to be renew soon!
-    EXPIRED = 8               # Expired certificate
-    SUBJECTS_CHANGED = 9      # Configuration of cert (CN/SANs) has changed, need to re-issue
+    CHALLENGES_REJECTED = 6   # Challenges have been rejected by the ACME directory
+    VALID = 7                 # Valid certificate
+    NEEDS_RENEWAL = 8         # Valid certificate that needs to be renew soon!
+    EXPIRED = 9               # Expired certificate
+    SUBJECTS_CHANGED = 10     # Configuration of cert (CN/SANs) has changed, need to re-issue
 
 
 class CertificateState:
     """
     CertificateState tracks the current status of a certificate and the number of retries performed to
-    reach CertificateStatus.VALID status. After MAX_CONSECUTIVE_RETRIES it will apply an exponential backoff
+    reach CertificateStatus.VALID status. After MAX_CONSECUTIVE_RETRIES it will apply an exponential backoff to the
+    status listed in STATUS_WITH_RETRIES and it will impose a slow retry policy (+1day) for status listed in
+    STATUS_WITH_SLOW_RETRIES
     """
     STATUS_WITH_RETRIES = (CertificateStatus.CSR_PUSHED, CertificateStatus.CHALLENGES_VALIDATED,
                            CertificateStatus.CHALLENGES_PUSHED)
+    STATUS_WITH_SLOW_RETRIES = (CertificateStatus.CHALLENGES_REJECTED,)
     MAX_CONSECUTIVE_RETRIES = 3
     MAX_RETRIES = 16
+    SLOW_RETRY = datetime.timedelta(days=1)
 
     def __init__(self, status):
         self._status = status
@@ -164,7 +169,12 @@ class CertificateState:
     def status(self, value):
         self._status = value
 
-        if value not in CertificateState.STATUS_WITH_RETRIES:
+        if value in CertificateState.STATUS_WITH_SLOW_RETRIES:
+            self._retries += 1
+            self._next_retry = datetime.datetime.utcnow() + CertificateState.SLOW_RETRY
+            return
+
+        if value not in CertificateState.STATUS_WITH_RETRIES + CertificateState.STATUS_WITH_SLOW_RETRIES:
             self._retries = 0
             self._next_retry = datetime.datetime.fromtimestamp(0)
             return
@@ -342,7 +352,8 @@ class CertCentral():
             for key_type_id in KEY_TYPES:
                 try:
                     current_status = self.cert_status[cert_id][key_type_id]
-                    if current_status in [CertificateStatus.CSR_PUSHED, CertificateStatus.CHALLENGES_PUSHED]:
+                    if current_status in (CertificateStatus.CSR_PUSHED, CertificateStatus.CHALLENGES_PUSHED,
+                                          CertificateStatus.CHALLENGES_REJECTED):
                         # we don't want to break the current cert. issue process
                         continue
                 except KeyError:
@@ -609,7 +620,11 @@ class CertCentral():
             logger.warning("ACME Directory hasn't validated the challenge(s) yet for certificate %s / %s",
                            cert_id, key_type_id)
             return CertificateStatus.CHALLENGES_PUSHED
-        except (ACMEOrderNotFound, ACMEInvalidChallengeError, ACMEError):
+        except ACMEInvalidChallengeError:
+            logger.warning("ACME Directory has rejected the challenge(s) for certificate %s / %s",
+                           cert_id, key_type_id)
+            return CertificateStatus.CHALLENGES_REJECTED
+        except (ACMEOrderNotFound, ACMEError):
             logger.exception("Problem getting certificate for certificate %s / %s",
                              cert_id, key_type_id)
             return CertificateStatus.SELF_SIGNED
@@ -655,7 +670,8 @@ class CertCentral():
                     elif cert_state.status in (CertificateStatus.SELF_SIGNED,
                                                CertificateStatus.NEEDS_RENEWAL,
                                                CertificateStatus.EXPIRED,
-                                               CertificateStatus.SUBJECTS_CHANGED):
+                                               CertificateStatus.SUBJECTS_CHANGED,
+                                               CertificateStatus.CHALLENGES_REJECTED):
                         new_status = self._new_certificate(cert_id, key_type_id)
                     elif cert_state.status is CertificateStatus.CSR_PUSHED:
                         new_status = self._handle_pushed_csr(cert_id, key_type_id)

@@ -13,6 +13,7 @@ from certcentral.acme_requests import (ACMEAccount,
                                        ACMEChallengeNotValidatedError,
                                        ACMEChallengeType,
                                        ACMEChallengeValidation, ACMEError,
+                                       ACMEInvalidChallengeError,
                                        DNS01ACMEChallenge)
 from certcentral.certcentral import (CERTIFICATE_TYPES,
                                      DEFAULT_DNS_ZONE_UPDATE_CMD,
@@ -150,6 +151,15 @@ class CertificateStateTest(unittest.TestCase):
             self.assertEqual(self.state.retries, 0)
             self.assertGreaterEqual(datetime.utcnow(), self.state.next_retry)
             self.assertTrue(self.state.retry)
+
+    def test_set_status_with_slow_retries(self):
+        for status in CertificateState.STATUS_WITH_SLOW_RETRIES:
+            current_retries = self.state.retries
+            self.state.status = status
+            self.assertEqual(self.state.retries, current_retries+1)
+            self.assertFalse(self.state.retry)
+            self.assertAlmostEqual(self.state.next_retry, datetime.utcnow() + CertificateState.SLOW_RETRY,
+                                   delta=timedelta(seconds=1))
 
     def test_set_status_with_retries(self):
         for status in CertificateState.STATUS_WITH_RETRIES:
@@ -673,6 +683,21 @@ class CertCentralStatusTransitionTests(unittest.TestCase):
     @mock.patch.object(PrivateKeyLoader, 'load')
     @mock.patch('certcentral.certcentral.CertificateSigningRequest')
     @mock.patch.object(CertCentral, '_get_acme_session')
+    def test_handle_pushed_challenges_validation_failed(self, get_acme_session_mock, csr_mock, pkey_loader_mock):
+        get_acme_session_mock.return_value.get_certificate.side_effect = ACMEInvalidChallengeError
+        status = self.instance._handle_pushed_challenges('test_certificate', 'rsa-2048')
+        self.assertEqual(status, CertificateStatus.CHALLENGES_REJECTED)
+        pkey_loader_calls = [mock.call(self.instance._get_path('test_certificate', 'rsa-2048',
+                                                               public=False, kind='new'))]
+        pkey_loader_mock.assert_has_calls(pkey_loader_calls)
+        get_acme_session_mock.assert_called_once()
+        acme_session_calls = [mock.call(self.instance.config.certificates['test_certificate']),
+                              mock.call().get_certificate(csr_mock.generate_csr_id.return_value)]
+        get_acme_session_mock.assert_has_calls(acme_session_calls)
+
+    @mock.patch.object(PrivateKeyLoader, 'load')
+    @mock.patch('certcentral.certcentral.CertificateSigningRequest')
+    @mock.patch.object(CertCentral, '_get_acme_session')
     @mock.patch.object(CertCentral, '_push_live_certificate')
     def test_handle_pushed_challenges(self, push_live_mock, get_acme_session_mock, csr_mock, pkey_loader_mock):
         push_live_mock.return_value = CertificateStatus.VALID
@@ -991,7 +1016,7 @@ class CertCentralIntegrationTest(BasePebbleIntegrationTest):
     @mock.patch('certcentral.acme_requests.TLS_VERIFY', False)
     @mock.patch('signal.signal')
     @mock.patch.object(CertCentral, 'sighup_handler')
-    def test_issue_new_certificate_force_validation_failure(self, a, b):
+    def test_issue_new_certificate_force_validation_failure_certcentral_side(self, a, b):
         # Step 1 - create an ACME account
         account = ACMEAccount.create('tests-certcentral@wikimedia.org',
                                      base_path=self.acme_account_base_path,
@@ -1056,6 +1081,73 @@ class CertCentralIntegrationTest(BasePebbleIntegrationTest):
                 self.assertEqual(status, CertificateStatus.VALID)
                 cert = Certificate.load(cert_central._get_path(cert_id, key_type_id, public=True, kind='live'))
                 self.assertFalse(cert.self_signed)
+
+    @mock.patch('certcentral.acme_requests.TLS_VERIFY', False)
+    @mock.patch('signal.signal')
+    @mock.patch.object(CertCentral, 'sighup_handler')
+    def test_issue_new_certificate_force_validation_failure_acme_directory_side(self, a, b):
+        # Step 1 - create an ACME account
+        account = ACMEAccount.create('tests-certcentral@wikimedia.org',
+                                     base_path=self.acme_account_base_path,
+                                     directory_url=DIRECTORY_URL)
+        account.save()
+        # Step 2 - Generate CertCentral config
+        cert_central = CertCentral(base_path=self.temp_dir.name)
+        cert_central.config = CertCentralConfig(
+            accounts=[{'id': account.account_id, 'directory': DIRECTORY_URL}],
+            certificates={
+                'test_certificate':
+                {
+                    'CN': 'certcentraltest.beta.wmflabs.org',
+                    'SNI': ['certcentraltest.beta.wmflabs.org'],
+                    'challenge': 'http-01',
+                },
+            },
+            default_account=account.account_id,
+            authorized_hosts={
+                'test_certificate': ['localhost']
+            },
+            challenges={
+                'dns-01': {
+                    'validation_dns_servers': ['127.0.0.1'],
+                    'sync_dns_servers': ['127.0.0.1'],
+                }
+            }
+        )
+        cert_central.cert_status = {'test_certificate': {
+            'ec-prime256v1': CertificateState(CertificateStatus.INITIAL),
+            'rsa-2048': CertificateState(CertificateStatus.INITIAL),
+        }}
+
+        # Step 3 - Generate self signed certificates
+        cert_central.create_initial_certs()
+        for cert_id in cert_central.cert_status:
+            for key_type_id in KEY_TYPES:
+                self.assertEqual(cert_central.cert_status[cert_id][key_type_id].status, CertificateStatus.SELF_SIGNED)
+                cert = Certificate.load(cert_central._get_path(cert_id, key_type_id, public=True, kind='live'))
+                self.assertTrue(cert.self_signed)
+
+        # Step 4 - Request new certificates mocking CertCentral._handle_validated_challenges() method
+        # to stop the process after the challenges have been validated on certcentral side
+        with mock.patch.object(cert_central, '_handle_validated_challenges',
+                               return_value=CertificateStatus.CHALLENGES_VALIDATED) as mock_validated:
+            for cert_id in cert_central.cert_status:
+                for key_type_id in KEY_TYPES:
+                    mock_validated.reset_mock()
+                    status = cert_central._new_certificate(cert_id, key_type_id)
+                    mock_validated.assert_called_once_with(cert_id, key_type_id)
+                    self.assertEqual(status, CertificateStatus.CHALLENGES_VALIDATED)
+
+        # Step 5 - Wipe the challenges to force a validation error on ACME directory side
+        for root, _, files in os.walk(cert_central.challenges_path[ACMEChallengeType.HTTP01]):
+            for name in files:
+                os.unlink(os.path.join(root, name))
+
+        # Step 5 - Resume the process
+        for cert_id in cert_central.cert_status:
+            for key_type_id in KEY_TYPES:
+                status = cert_central._handle_validated_challenges(cert_id, key_type_id)
+                self.assertEqual(status, CertificateStatus.CHALLENGES_REJECTED)
 
     @mock.patch('certcentral.acme_requests.TLS_VERIFY', False)
     @mock.patch('signal.signal')

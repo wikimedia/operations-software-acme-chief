@@ -14,6 +14,7 @@ from certcentral.acme_requests import (ACMEAccount,
                                        ACMEChallengeType,
                                        ACMEChallengeValidation, ACMEError,
                                        ACMEInvalidChallengeError,
+                                       ACMEIssuedCertificateError,
                                        DNS01ACMEChallenge)
 from certcentral.certcentral import (CERTIFICATE_TYPES,
                                      DEFAULT_DNS_ZONE_UPDATE_CMD,
@@ -304,31 +305,17 @@ class CertCentralTest(unittest.TestCase):
     @mock.patch.object(PrivateKeyLoader, 'load')
     @mock.patch.object(Certificate, 'load')
     @mock.patch.object(CertCentral, '_get_path')
-    def test_push_live_certificate(self, get_path_mock, certificate_load_mock, pkey_load_mock):
-        self.instance._push_live_certificate('test_certificate', 'rsa-2048')
+    def test_push_live_certificate_exceptions(self, get_path_mock, certificate_load_mock, pkey_load_mock):
+        for side_effect in [OSError, X509Error]:
+            pkey_load_mock.side_effect = side_effect
+            status = self.instance._push_live_certificate('test_certificate', 'rsa-2048')
+            self.assertEqual(status, CertificateStatus.CERTIFICATE_ISSUED)
 
-        get_path_new_calls = [mock.call('test_certificate', 'rsa-2048', kind='new', public=False),
-                              mock.call('test_certificate', 'rsa-2048',
-                                        cert_type='full_chain', kind='new', public=True)]
-        get_path_mock.assert_has_calls(get_path_new_calls, any_order=True)
-        get_path_live_calls = [mock.call('test_certificate', 'rsa-2048', kind='live', public=False),
-                               mock.call('test_certificate', 'rsa-2048',
-                                         cert_type='cert_only', kind='live', public=True),
-                               mock.call('test_certificate', 'rsa-2048',
-                                         cert_type='chain_only', kind='live', public=True),
-                               mock.call('test_certificate', 'rsa-2048',
-                                         cert_type='full_chain', kind='live', public=True)]
-        get_path_mock.assert_has_calls(get_path_live_calls, any_order=True)
-        certificate_load_mock_calls = [mock.call(get_path_mock.return_value),
-                                       mock.call().save(get_path_mock.return_value,
-                                                        mode=CertificateSaveMode.CERT_ONLY),
-                                       mock.call().save(get_path_mock.return_value,
-                                                        mode=CertificateSaveMode.CHAIN_ONLY),
-                                       mock.call().save(get_path_mock.return_value,
-                                                        mode=CertificateSaveMode.FULL_CHAIN)]
-        certificate_load_mock.assert_has_calls(certificate_load_mock_calls, any_order=True)
-        pkey_load_calls = [mock.call(get_path_mock.return_value), mock.call().save(get_path_mock.return_value)]
-        pkey_load_mock.assert_has_calls(pkey_load_calls)
+        for side_effect in [OSError, X509Error]:
+            certificate_load_mock.side_effect = side_effect
+            status = self.instance._push_live_certificate('test_certificate', 'rsa-2048')
+            self.assertEqual(status, CertificateStatus.CERTIFICATE_ISSUED)
+
 
     @mock.patch('subprocess.check_call')
     def test_update_dns_zone(self, check_call_mock):
@@ -687,6 +674,21 @@ class CertCentralStatusTransitionTests(unittest.TestCase):
         get_acme_session_mock.return_value.get_certificate.side_effect = ACMEInvalidChallengeError
         status = self.instance._handle_pushed_challenges('test_certificate', 'rsa-2048')
         self.assertEqual(status, CertificateStatus.CHALLENGES_REJECTED)
+        pkey_loader_calls = [mock.call(self.instance._get_path('test_certificate', 'rsa-2048',
+                                                               public=False, kind='new'))]
+        pkey_loader_mock.assert_has_calls(pkey_loader_calls)
+        get_acme_session_mock.assert_called_once()
+        acme_session_calls = [mock.call(self.instance.config.certificates['test_certificate']),
+                              mock.call().get_certificate(csr_mock.generate_csr_id.return_value)]
+        get_acme_session_mock.assert_has_calls(acme_session_calls)
+
+    @mock.patch.object(PrivateKeyLoader, 'load')
+    @mock.patch('certcentral.certcentral.CertificateSigningRequest')
+    @mock.patch.object(CertCentral, '_get_acme_session')
+    def test_handle_pushed_challenges_error_parsing_cert(self, get_acme_session_mock, csr_mock, pkey_loader_mock):
+        get_acme_session_mock.return_value.get_certificate.side_effect = ACMEIssuedCertificateError
+        status = self.instance._handle_pushed_challenges('test_certificate', 'rsa-2048')
+        self.assertEqual(status, CertificateStatus.CERTIFICATE_ISSUED)
         pkey_loader_calls = [mock.call(self.instance._get_path('test_certificate', 'rsa-2048',
                                                                public=False, kind='new'))]
         pkey_loader_mock.assert_has_calls(pkey_loader_calls)

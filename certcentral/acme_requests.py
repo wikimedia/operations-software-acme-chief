@@ -57,6 +57,10 @@ class ACMEChallengeNotValidatedError(ACMEError):
     """Challenge(s) have not been validated yet by the ACME Directory"""
 
 
+class ACMEIssuedCertificateError(ACMEError):
+    """Error handling the recently issued certificate"""
+
+
 class ACMEAccountFiles(Enum):
     """Files needed to persist an account"""
     KEY = 'private_key.pem'
@@ -391,12 +395,13 @@ class ACMERequests:
             self._clean(csr_id)
             raise ACMEError('Unable to get certificate') from finalize_error
 
+        self._clean(csr_id)
+
         try:
             certificate = Certificate(finished_order.fullchain_pem.encode('utf-8'))
         except X509Error as certificate_error:
-            raise ACMEError('Received invalid PEM from ACME server') from certificate_error
+            raise ACMEIssuedCertificateError('Received invalid PEM from ACME server') from certificate_error
 
-        self._clean(csr_id)
         return certificate
 
     def revoke_certificate(self, certificate, reason=CertificateRevokeReason.UNSPECIFIED):

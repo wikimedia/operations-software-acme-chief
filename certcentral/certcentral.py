@@ -38,6 +38,7 @@ from certcentral.acme_requests import (ACMEAccount,
                                        ACMEChallengeType,
                                        ACMEChallengeValidation, ACMEError,
                                        ACMEInvalidChallengeError,
+                                       ACMEIssuedCertificateError,
                                        ACMEOrderNotFound, ACMERequests)
 from certcentral.x509 import (Certificate, CertificateSaveMode,
                               CertificateSigningRequest, ECPrivateKey,
@@ -117,10 +118,11 @@ class CertificateStatus(Enum):
     CHALLENGES_VALIDATED = 4  # Challenges have been successfully validated
     CHALLENGES_PUSHED = 5     # Challenges pushed to the ACME directory
     CHALLENGES_REJECTED = 6   # Challenges have been rejected by the ACME directory
-    VALID = 7                 # Valid certificate
-    NEEDS_RENEWAL = 8         # Valid certificate that needs to be renew soon!
-    EXPIRED = 9               # Expired certificate
-    SUBJECTS_CHANGED = 10     # Configuration of cert (CN/SANs) has changed, need to re-issue
+    CERTIFICATE_ISSUED = 7    # Certificate issued by the ACME directory but stilll not persisted on disk
+    VALID = 8                 # Valid certificate succesfully persisted on disk
+    NEEDS_RENEWAL = 9         # Valid certificate that needs to be renew soon!
+    EXPIRED = 10              # Expired certificate
+    SUBJECTS_CHANGED = 11     # Configuration of cert (CN/SANs) has changed, need to re-issue
 
 
 class CertificateState:
@@ -132,7 +134,7 @@ class CertificateState:
     """
     STATUS_WITH_RETRIES = (CertificateStatus.CSR_PUSHED, CertificateStatus.CHALLENGES_VALIDATED,
                            CertificateStatus.CHALLENGES_PUSHED)
-    STATUS_WITH_SLOW_RETRIES = (CertificateStatus.CHALLENGES_REJECTED,)
+    STATUS_WITH_SLOW_RETRIES = (CertificateStatus.CHALLENGES_REJECTED, CertificateStatus.CERTIFICATE_ISSUED)
     MAX_CONSECUTIVE_RETRIES = 3
     MAX_RETRIES = 16
     SLOW_RETRY = datetime.timedelta(days=1)
@@ -353,7 +355,7 @@ class CertCentral():
                 try:
                     current_status = self.cert_status[cert_id][key_type_id]
                     if current_status in (CertificateStatus.CSR_PUSHED, CertificateStatus.CHALLENGES_PUSHED,
-                                          CertificateStatus.CHALLENGES_REJECTED):
+                                          CertificateStatus.CHALLENGES_REJECTED, CertificateStatus.CERTIFICATE_ISSUED):
                         # we don't want to break the current cert. issue process
                         continue
                 except KeyError:
@@ -592,7 +594,7 @@ class CertCentral():
                              cert_id, key_type_id)
             return CertificateStatus.CHALLENGES_PUSHED
 
-    def _handle_pushed_challenges(self, cert_id, key_type_id):
+    def _handle_pushed_challenges(self, cert_id, key_type_id):  # pylint: disable=too-many-return-statements
         """Handles CHALLENGES_PUSHED status. Performs the following actions:
             - Attempts to fetch the signed certificate from the ACME directory
             - Persists the certificate on disk
@@ -624,13 +626,22 @@ class CertCentral():
             logger.warning("ACME Directory has rejected the challenge(s) for certificate %s / %s",
                            cert_id, key_type_id)
             return CertificateStatus.CHALLENGES_REJECTED
+        except ACMEIssuedCertificateError:
+            logger.warning("Unable to handle certificate issued by the ACME directory for certificate %s / %s",
+                           cert_id, key_type_id)
+            return CertificateStatus.CERTIFICATE_ISSUED
         except (ACMEOrderNotFound, ACMEError):
             logger.exception("Problem getting certificate for certificate %s / %s",
                              cert_id, key_type_id)
             return CertificateStatus.SELF_SIGNED
 
-        certificate.save(self._get_path(cert_id, key_type_id, public=True, kind='new', cert_type='full_chain'),
-                         mode=CertificateSaveMode.FULL_CHAIN)
+        try:
+            certificate.save(self._get_path(cert_id, key_type_id, public=True, kind='new', cert_type='full_chain'),
+                             mode=CertificateSaveMode.FULL_CHAIN)
+        except OSError:
+            logger.exception("Problem persisting certificate %s / %s on disk", cert_id, key_type_id)
+            return CertificateStatus.CERTIFICATE_ISSUED
+
         return self._push_live_certificate(cert_id, key_type_id)
 
     def _push_live_certificate(self, cert_id, key_type_id):
@@ -647,7 +658,7 @@ class CertCentral():
         except (OSError, X509Error):
             logger.exception("Problem pushing live certificate %s / %s",
                              cert_id, key_type_id)
-            return CertificateStatus.SELF_SIGNED
+            return CertificateStatus.CERTIFICATE_ISSUED
 
         return CertificateStatus.VALID
 
@@ -671,7 +682,8 @@ class CertCentral():
                                                CertificateStatus.NEEDS_RENEWAL,
                                                CertificateStatus.EXPIRED,
                                                CertificateStatus.SUBJECTS_CHANGED,
-                                               CertificateStatus.CHALLENGES_REJECTED):
+                                               CertificateStatus.CHALLENGES_REJECTED,
+                                               CertificateStatus.CERTIFICATE_ISSUED):
                         new_status = self._new_certificate(cert_id, key_type_id)
                     elif cert_state.status is CertificateStatus.CSR_PUSHED:
                         new_status = self._handle_pushed_csr(cert_id, key_type_id)

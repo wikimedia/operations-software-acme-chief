@@ -1,3 +1,10 @@
+certcentral (0.4-1) stretch-wikimedia; urgency=medium
+
+  Avoid fast retry on local errors after cert is issued
+  Implement slow retries on challenge rejection by ACME dir.
+
+ -- Valentin Gutierrez <vgutierrez@wikimedia.org>  Mon, 29 Oct 2018 16:32:29 +0100
+
 certcentral (0.3-1) stretch-wikimedia; urgency=medium
 
   Track number of retries and apply exponential backoff.

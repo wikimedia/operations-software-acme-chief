@@ -123,6 +123,8 @@ class CertificateStatus(Enum):
     NEEDS_RENEWAL = 9         # Valid certificate that needs to be renew soon!
     EXPIRED = 10              # Expired certificate
     SUBJECTS_CHANGED = 11     # Configuration of cert (CN/SANs) has changed, need to re-issue
+    CERTCENTRAL_ERROR = 12    # Certificate issuance failed due to some certcentral non-recoverable error
+    ACMEDIR_ERROR = 13        # Certificate issuance failed due to some ACME directory non-recoverable error
 
 
 class CertificateState:
@@ -133,8 +135,9 @@ class CertificateState:
     STATUS_WITH_SLOW_RETRIES
     """
     STATUS_WITH_RETRIES = (CertificateStatus.CSR_PUSHED, CertificateStatus.CHALLENGES_VALIDATED,
-                           CertificateStatus.CHALLENGES_PUSHED)
-    STATUS_WITH_SLOW_RETRIES = (CertificateStatus.CHALLENGES_REJECTED, CertificateStatus.CERTIFICATE_ISSUED)
+                           CertificateStatus.CHALLENGES_PUSHED, CertificateStatus.ACMEDIR_ERROR)
+    STATUS_WITH_SLOW_RETRIES = (CertificateStatus.CHALLENGES_REJECTED, CertificateStatus.CERTIFICATE_ISSUED,
+                                CertificateStatus.CERTCENTRAL_ERROR)
     MAX_CONSECUTIVE_RETRIES = 3
     MAX_RETRIES = 16
     SLOW_RETRY = datetime.timedelta(days=1)
@@ -355,7 +358,8 @@ class CertCentral():
                 try:
                     current_status = self.cert_status[cert_id][key_type_id]
                     if current_status in (CertificateStatus.CSR_PUSHED, CertificateStatus.CHALLENGES_PUSHED,
-                                          CertificateStatus.CHALLENGES_REJECTED, CertificateStatus.CERTIFICATE_ISSUED):
+                                          CertificateStatus.CHALLENGES_REJECTED, CertificateStatus.CERTIFICATE_ISSUED,
+                                          CertificateStatus.CERTCENTRAL_ERROR, CertificateStatus.ACMEDIR_ERROR):
                         # we don't want to break the current cert. issue process
                         continue
                 except KeyError:
@@ -482,7 +486,7 @@ class CertCentral():
         if challenge_type not in challenges:
             logger.warning("Unable to get required challenge type %s for certificate %s / %s",
                            challenge_type, cert_id, key_type_id)
-            return CertificateStatus.SELF_SIGNED
+            return CertificateStatus.CERTCENTRAL_ERROR
         try:
             for challenge in challenges[challenge_type]:
                 challenge.save(os.path.join(self.challenges_path[challenge_type],
@@ -490,13 +494,13 @@ class CertCentral():
         except OSError:
             logger.exception("OSError encountered while saving challenge type %s for certificate %s / %s",
                              challenge_type, cert_id, key_type_id)
-            return CertificateStatus.SELF_SIGNED
+            return CertificateStatus.CERTCENTRAL_ERROR
 
         if challenge_type == ACMEChallengeType.DNS01:
             if not self._trigger_dns_zone_update(challenges[challenge_type]):
                 logger.warning("Failed to perform DNS zone update for certificate %s / %s",
                                cert_id, key_type_id)
-                return CertificateStatus.SELF_SIGNED
+                return CertificateStatus.CERTCENTRAL_ERROR
 
         status = CertificateStatus.CSR_PUSHED
         status = self._handle_pushed_csr(cert_id, key_type_id)
@@ -514,7 +518,7 @@ class CertCentral():
         except (OSError, X509Error):
             logger.exception("Failed to load new private key for certificate %s / %s",
                              cert_id, key_type_id)
-            return CertificateStatus.SELF_SIGNED
+            return CertificateStatus.CERTCENTRAL_ERROR
 
         cert_details = self.config.certificates[cert_id]
 
@@ -533,7 +537,7 @@ class CertCentral():
         except KeyError:
             logger.exception("Could not find challenge for challenge type %s, certificate %s / %s",
                              challenge_type, cert_id, key_type_id)
-            return CertificateStatus.SELF_SIGNED
+            return CertificateStatus.CERTCENTRAL_ERROR
 
         for challenge in challenges:
             if challenge.challenge_type is ACMEChallengeType.DNS01:
@@ -563,7 +567,7 @@ class CertCentral():
         except (OSError, X509Error):
             logger.exception("Failed to load new private key for certificate %s / %s",
                              cert_id, key_type_id)
-            return CertificateStatus.SELF_SIGNED
+            return CertificateStatus.CERTCENTRAL_ERROR
 
         cert_details = self.config.certificates[cert_id]
 
@@ -581,14 +585,14 @@ class CertCentral():
             logger.exception("Could not find ACME order when pushing solved challenges for challenge type %s, "
                              "certificate %s / %s",
                              challenge_type, cert_id, key_type_id)
-            return CertificateStatus.SELF_SIGNED
+            return CertificateStatus.CERTCENTRAL_ERROR
 
         try:
             return self._handle_pushed_challenges(cert_id, key_type_id)
         except ACMEOrderNotFound:
             logger.exception("Could not find ACME order when handling pushed challenges for certificate %s / %s",
                              cert_id, key_type_id)
-            return CertificateStatus.SELF_SIGNED
+            return CertificateStatus.CERTCENTRAL_ERROR
         except ACMEError:
             logger.exception("ACMEError when handling pushed challenges for certificate %s / %s",
                              cert_id, key_type_id)
@@ -605,7 +609,7 @@ class CertCentral():
         except (OSError, X509Error):
             logger.exception("Failed to load new private key for certificate %s / %s",
                              cert_id, key_type_id)
-            return CertificateStatus.SELF_SIGNED
+            return CertificateStatus.CERTCENTRAL_ERROR
 
         cert_details = self.config.certificates[cert_id]
 
@@ -630,10 +634,14 @@ class CertCentral():
             logger.warning("Unable to handle certificate issued by the ACME directory for certificate %s / %s",
                            cert_id, key_type_id)
             return CertificateStatus.CERTIFICATE_ISSUED
-        except (ACMEOrderNotFound, ACMEError):
+        except ACMEOrderNotFound:
+            logger.exception("Could not find ACME order when attempting to get the certificate %s / %s",
+                             cert_id, key_type_id)
+            return CertificateStatus.CERTCENTRAL_ERROR
+        except ACMEError:
             logger.exception("Problem getting certificate for certificate %s / %s",
                              cert_id, key_type_id)
-            return CertificateStatus.SELF_SIGNED
+            return CertificateStatus.ACMEDIR_ERROR
 
         try:
             certificate.save(self._get_path(cert_id, key_type_id, public=True, kind='new', cert_type='full_chain'),
@@ -683,7 +691,9 @@ class CertCentral():
                                                CertificateStatus.EXPIRED,
                                                CertificateStatus.SUBJECTS_CHANGED,
                                                CertificateStatus.CHALLENGES_REJECTED,
-                                               CertificateStatus.CERTIFICATE_ISSUED):
+                                               CertificateStatus.CERTIFICATE_ISSUED,
+                                               CertificateStatus.CERTCENTRAL_ERROR,
+                                               CertificateStatus.ACMEDIR_ERROR):
                         new_status = self._new_certificate(cert_id, key_type_id)
                     elif cert_state.status is CertificateStatus.CSR_PUSHED:
                         new_status = self._handle_pushed_csr(cert_id, key_type_id)

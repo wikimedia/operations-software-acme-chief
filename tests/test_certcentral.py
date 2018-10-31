@@ -555,7 +555,7 @@ class CertCentralStatusTransitionTests(unittest.TestCase):
             pkey_loader_mock.reset_mock()
             pkey_loader_mock.side_effect = side_effect
             status = self.instance._handle_pushed_csr('test_certificate', 'rsa-2048')
-            self.assertEqual(status, CertificateStatus.SELF_SIGNED)
+            self.assertEqual(status, CertificateStatus.CERTCENTRAL_ERROR)
 
     @mock.patch.object(PrivateKeyLoader, 'load')
     @mock.patch('certcentral.certcentral.CertificateSigningRequest')
@@ -596,7 +596,7 @@ class CertCentralStatusTransitionTests(unittest.TestCase):
             pkey_loader_mock.reset_mock()
             pkey_loader_mock.side_effect = side_effect
             status = self.instance._handle_validated_challenges('test_certificate', 'rsa-2048')
-            self.assertEqual(status, CertificateStatus.SELF_SIGNED)
+            self.assertEqual(status, CertificateStatus.CERTCENTRAL_ERROR)
 
     @mock.patch.object(PrivateKeyLoader, 'load')
     @mock.patch('certcentral.certcentral.CertificateSigningRequest')
@@ -650,7 +650,7 @@ class CertCentralStatusTransitionTests(unittest.TestCase):
             pkey_loader_mock.reset_mock()
             pkey_loader_mock.side_effect = side_effect
             status = self.instance._handle_pushed_challenges('test_certificate', 'rsa-2048')
-            self.assertEqual(status, CertificateStatus.SELF_SIGNED)
+            self.assertEqual(status, CertificateStatus.CERTCENTRAL_ERROR)
 
     @mock.patch.object(PrivateKeyLoader, 'load')
     @mock.patch('certcentral.certcentral.CertificateSigningRequest')

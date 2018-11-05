@@ -21,6 +21,7 @@ A description of it can be found at https://phabricator.wikimedia.org/T194962
 """
 import argparse
 import collections
+import copy
 import datetime
 import logging
 import logging.config
@@ -389,7 +390,24 @@ class CertCentral():
         """
         logger.info("SIGHUP received")
         self.config = CertCentralConfig.load(file_name=self.config_path, confd_path=self.confd_path)
+        if self.cert_status:
+            previous_status = copy.deepcopy(self.cert_status)
+        else:
+            previous_status = None
         self.cert_status = self._set_cert_status()
+        if previous_status:
+            removed_certs = previous_status.keys() - self.cert_status.keys()
+            if removed_certs:
+                logger.info("Removed certificates: %s", removed_certs)
+            new_certs = self.cert_status.keys() - previous_status.keys()
+            if new_certs:
+                logger.info("New configured certificates: %s", new_certs)
+        counters = collections.Counter()
+        for cert_id in self.cert_status:
+            for key_type_id in KEY_TYPES:
+                cert_status = self.cert_status[cert_id][key_type_id].status.name
+                counters[cert_status] += 1
+        logger.info("Number of certificates per status: %s", counters)
         self.create_initial_certs()
 
     def create_initial_certs(self):

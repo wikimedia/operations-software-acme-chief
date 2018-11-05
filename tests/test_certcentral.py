@@ -1,3 +1,4 @@
+import collections
 import os
 import shutil
 import subprocess
@@ -229,7 +230,7 @@ class CertCentralTest(unittest.TestCase):
     @mock.patch.object(CertCentralConfig, 'load')
     @mock.patch.object(CertCentral, '_set_cert_status')
     @mock.patch.object(CertCentral, 'create_initial_certs')
-    def test_sighup_handler(self, create_initial_certs_mock, set_cert_status_mock, load_mock) :
+    def test_sighup_handler(self, create_initial_certs_mock, set_cert_status_mock, load_mock):
         self.instance.sighup_handler()
 
         load_mock_calls = [mock.call(confd_path=self.instance.confd_path, file_name=self.instance.config_path)]
@@ -237,6 +238,41 @@ class CertCentralTest(unittest.TestCase):
         load_mock.assert_called_once()
         set_cert_status_mock.assert_called_once()
         create_initial_certs_mock.assert_called_once()
+
+    @mock.patch.object(CertCentralConfig, 'load')
+    @mock.patch.object(CertCentral, '_set_cert_status')
+    @mock.patch.object(CertCentral, 'create_initial_certs')
+    def test_sighup_handler_status_reporting(self, create_initial_certs_mock, set_cert_status_mock, load_mock):
+        self.instance.cert_status['test_certificate']['rsa-2048'] = CertificateState(CertificateStatus.INITIAL)
+        self.instance.cert_status['test_certificate']['ec-prime256v1'] = CertificateState(CertificateStatus.INITIAL)
+        set_cert_status_mock.return_value = self.instance.cert_status
+        with self.assertLogs('certcentral.certcentral', level='INFO') as log_trap:
+            self.instance.sighup_handler()
+
+        self.assertIn('INFO:certcentral.certcentral:Number of certificates per status', log_trap.output[-1])
+
+        set_cert_status_mock.return_value = collections.defaultdict(dict)
+        with self.assertLogs('certcentral.certcentral', level='INFO') as log_trap:
+            self.instance.sighup_handler()
+
+        self.assertIn('INFO:certcentral.certcentral:Removed certificates', log_trap.output[-2])
+
+        set_cert_status_mock.return_value = {
+            'test_certificate': {
+                'rsa-2048': CertificateState(CertificateStatus.INITIAL),
+                'ec-prime256v1': CertificateState(CertificateStatus.INITIAL),
+            },
+            'test_certificate2': {
+                'rsa-2048': CertificateState(CertificateStatus.INITIAL),
+                'ec-prime256v1': CertificateState(CertificateStatus.INITIAL),
+            },
+        }
+        self.instance.cert_status['test_certificate']['rsa-2048'] = CertificateState(CertificateStatus.INITIAL)
+        self.instance.cert_status['test_certificate']['ec-prime256v1'] = CertificateState(CertificateStatus.INITIAL)
+        with self.assertLogs('certcentral.certcentral', level='INFO') as log_trap:
+            self.instance.sighup_handler()
+
+        self.assertIn('INFO:certcentral.certcentral:New configured certificates', log_trap.output[-2])
 
     @mock.patch('certcentral.certcentral.SelfSignedCertificate')
     @mock.patch('certcentral.certcentral.Certificate')

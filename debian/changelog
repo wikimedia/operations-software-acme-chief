@@ -1,3 +1,10 @@
+certcentral (0.5-1) stretch-wikimedia; urgency=medium
+
+  Stop abusing SELF_SIGNED status to signal errors
+  Report certificate status on config (re)load
+
+ -- Valentin Gutierrez <vgutierrez@wikimedia.org>  Mon, 05 Nov 2018 16:33:38 +0000
+
 certcentral (0.4-1) stretch-wikimedia; urgency=medium
 
   Avoid fast retry on local errors after cert is issued

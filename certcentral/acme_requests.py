@@ -389,9 +389,11 @@ class ACMERequests:
             # TimeoutError is raised if the challenges have not been validated yet
             raise ACMEChallengeNotValidatedError('ACME directory has not been able to validate the challenge(s) yet')
         except errors.ValidationError:
+            logger.error("ACME directory has rejected the challenge(s) for order %s", order.uri)
             self._clean(csr_id)
             raise ACMEInvalidChallengeError('Unable to get certificate')
         except errors.Error as finalize_error:
+            logger.error("ACME directory has returned a generic finalization error for order %s", order.uri)
             self._clean(csr_id)
             raise ACMEError('Unable to get certificate') from finalize_error
 

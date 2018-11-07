@@ -80,6 +80,17 @@ class ACMEChallengeValidation(Enum):
     UNKNOWN = 3
 
 
+class ACMEStatus(Enum):
+    """Possible status of an ACME object"""
+    INVALID = messages.STATUS_INVALID
+    PENDING = messages.STATUS_PENDING
+    PROCESSING = messages.STATUS_PROCESSING
+    READY = messages.STATUS_READY
+    REVOKED = messages.STATUS_REVOKED
+    UNKNOWN = messages.STATUS_UNKNOWN
+    VALID = messages.STATUS_VALID
+
+
 class BaseACMEChallenge(abc.ABC):
     """Base ACME challenges class"""
     def __init__(self, challenge_type, validation):
@@ -346,7 +357,10 @@ class ACMERequests:
 
         self.orders[csr.csr_id] = new_order
 
-        self.challenges[csr.csr_id] = self._get_challenges_from_order(new_order, csr.wildcard)
+        if self.orders[csr.csr_id].body.status == ACMEStatus.PENDING.value:
+            self.challenges[csr.csr_id] = self._get_challenges_from_order(new_order, csr.wildcard)
+        else:
+            self.challenges[csr.csr_id] = {}
 
         return self.challenges[csr.csr_id]
 

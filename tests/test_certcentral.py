@@ -585,6 +585,32 @@ class CertCentralStatusTransitionTests(unittest.TestCase):
         dns_challenge_mock.assert_has_calls(dns_challenge_mock_call)
         self.assertEqual(status, CertificateStatus.VALID)
 
+    @mock.patch('certcentral.certcentral.CertificateSigningRequest')
+    @mock.patch.object(CertCentral, '_get_acme_session')
+    def test_new_certificate_new_order_ready(self, get_acme_session_mock, csr_mock):
+        dns_challenge_mock = mock.MagicMock()
+        dns_challenge_mock.file_name = 'mocked_challenged_file_name'
+        get_acme_session_mock.return_value.push_csr.return_value = {}
+        status = self.instance._new_certificate('test_certificate_dns01', 'ec-prime256v1')
+
+        csr_mock.assert_called_once_with(common_name='certcentraltest.beta.wmflabs.org',
+                                         private_key=self.ec_key_mock.return_value,
+                                         sans=['certcentraltest.beta.wmflabs.org'])
+        self.ec_key_mock.assert_called_once()
+        expected_key_calls = [mock.call(),
+                              mock.call().generate(**KEY_TYPES['ec-prime256v1']['params']),
+                              mock.call().save(self.instance._get_path('test_certificate_dns01',
+                                                                       'ec-prime256v1',
+                                                                       public=False,
+                                                                       kind='new'))]
+        self.ec_key_mock.assert_has_calls(expected_key_calls)
+        get_acme_session_mock.assert_called_once()
+        acme_session_calls = [mock.call(self.instance.config.certificates['test_certificate_dns01']),
+                              mock.call().push_csr(csr_mock.return_value)]
+        get_acme_session_mock.assert_has_calls(acme_session_calls)
+        dns_challenge_mock.assert_not_called()
+        self.assertEqual(status, CertificateStatus.CHALLENGES_PUSHED)
+
     @mock.patch.object(PrivateKeyLoader, 'load')
     def test_handle_pushed_csr_pkey_error(self, pkey_loader_mock):
         for side_effect in [OSError, X509Error]:

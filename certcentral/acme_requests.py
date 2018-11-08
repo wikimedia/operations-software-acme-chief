@@ -9,6 +9,7 @@ import hashlib
 import logging
 import os
 import socket
+import time
 from collections import defaultdict
 from datetime import datetime, timedelta
 from enum import Enum
@@ -55,6 +56,11 @@ class ACMEInvalidChallengeError(ACMEError):
 
 class ACMEChallengeNotValidatedError(ACMEError):
     """Challenge(s) have not been validated yet by the ACME Directory"""
+
+
+class ACMETimeoutFetchingCertificateError(ACMEError):
+    """Timeout AFTER sending the finalize request and BEFORE fetching the certificate.
+        Certcentral CANNOT send another finalize request after getting this error"""
 
 
 class ACMEIssuedCertificateError(ACMEError):
@@ -200,6 +206,32 @@ class HTTP01ACMEChallenge(BaseACMEChallenge):
         return '{}. http://{}{}: {}'.format(super().__str__(), self.hostname, self.path, self.validation)
 
 
+class ACMEClient(client.ClientV2):
+    """Subclass of client.ClientV2 that splits the finalize order and fetch certificate operations"""
+    def only_finalize_order(self, orderr):
+        """Uses super class finalize_order() method setting a deadline in the past to keep it from attempting
+           to fetch the certificate"""
+        try:
+            super().finalize_order(orderr, deadline=datetime.fromtimestamp(0))
+        except errors.TimeoutError:
+            # TimeoutError is going to be triggered every single time because of the passed deadline
+            pass
+
+    def fetch_certificate(self, orderr, deadline):
+        """Attempts to fetch the certificate on an already finalized order"""
+        while datetime.now() < deadline:
+            time.sleep(1)
+            response = self.net.get(orderr.uri)
+            body = messages.Order.from_json(response.json())
+            if body.error is not None:
+                raise errors.IssuanceError(body.error)
+            if body.certificate is not None:
+                certificate_response = self.net.get(body.certificate,
+                                                    content_type=client.DER_CONTENT_TYPE).text
+                return orderr.update(body=body, fullchain_pem=certificate_response)
+        raise errors.TimeoutError()
+
+
 class ACMEAccount:
     """"ACMEv2 account management
     heavily based on https://github.com/certbot/certbot/blob/master/certbot/account.py
@@ -223,7 +255,7 @@ class ACMEAccount:
         except (errors.Error, ValueError) as dir_error:
             raise ACMEError('Unable to fetch directory URLs') from dir_error
 
-        return client.ClientV2(directory, net)
+        return ACMEClient(directory, net)
 
     @staticmethod
     def _get_paths(account_id, base_path=BASEPATH, create_directory=False):
@@ -384,21 +416,20 @@ class ACMERequests:
                 except errors.Error as answer_challenge_error:
                     raise ACMEError('Unable to answer challenge') from answer_challenge_error
 
-    def get_certificate(self, csr_id, deadline=None):
+    def finalize_order(self, csr_id, deadline=None):
         """
-        Returns the certificate and the full chain (if present) wrapped in
-        a x509.Certificate instance.
+        Finalizes the ACME order.
         This should be called after the challenges have been fulfilled.
         """
         if deadline is None:
             # using now() instead of utcnow() cause acme_client uses now()
             # and using utcnow() on systems where now() != utcnow() cause
             # unexpected behaviour
-            deadline = datetime.now() + timedelta(seconds=2)
+            deadline = datetime.now() + timedelta(seconds=90)
 
         order = self._get_order(csr_id)
         try:
-            finished_order = self.acme_client.poll_and_finalize(order, deadline=deadline)
+            polled_order = self.acme_client.poll_authorizations(order, deadline=deadline)
         except errors.TimeoutError:
             # TimeoutError is raised if the challenges have not been validated yet
             raise ACMEChallengeNotValidatedError('ACME directory has not been able to validate the challenge(s) yet')
@@ -411,10 +442,34 @@ class ACMERequests:
             self._clean(csr_id)
             raise ACMEError('Unable to get certificate') from finalize_error
 
+        self.acme_client.only_finalize_order(polled_order)
+
+    def get_certificate(self, csr_id, deadline=None):
+        """
+        Returns the certificate and the full chain (if present) wrapped in
+        a x509.Certificate instance.
+        This should be called after the order has been finalized.
+        """
+        if deadline is None:
+            # using now() instead of utcnow() cause acme_client uses now()
+            # and using utcnow() on systems where now() != utcnow() cause
+            # unexpected behaviour
+            deadline = datetime.now() + timedelta(seconds=10)
+
+        finished_order = self._get_order(csr_id)
+
+        try:
+            certificate_order = self.acme_client.fetch_certificate(finished_order, deadline=deadline)
+        except errors.TimeoutError:
+            raise ACMETimeoutFetchingCertificateError('Timeout waiting for the ACME directory to finalize the order')
+        except errors.IssuanceError as issuance_error:
+            self._clean(csr_id)
+            raise ACMEError('Unable to get certificate') from issuance_error
+
         self._clean(csr_id)
 
         try:
-            certificate = Certificate(finished_order.fullchain_pem.encode('utf-8'))
+            certificate = Certificate(certificate_order.fullchain_pem.encode('utf-8'))
         except X509Error as certificate_error:
             raise ACMEIssuedCertificateError('Received invalid PEM from ACME server') from certificate_error
 

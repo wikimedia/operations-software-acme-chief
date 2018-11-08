@@ -500,6 +500,10 @@ class CertCentral():
         csr.save(csr_fullpath)
         session = self._get_acme_session(cert_details)
         challenges = session.push_csr(csr)
+        if not challenges:
+            logger.info("Skipping challenge validation for certificate %s / %s", cert_id, key_type_id)
+            return CertificateStatus.CHALLENGES_PUSHED
+
         challenge_type = CHALLENGE_TYPES[cert_details['challenge']]
         if challenge_type not in challenges:
             logger.warning("Unable to get required challenge type %s for certificate %s / %s",

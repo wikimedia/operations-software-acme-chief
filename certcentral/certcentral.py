@@ -40,7 +40,8 @@ from certcentral.acme_requests import (ACMEAccount,
                                        ACMEChallengeValidation, ACMEError,
                                        ACMEInvalidChallengeError,
                                        ACMEIssuedCertificateError,
-                                       ACMEOrderNotFound, ACMERequests)
+                                       ACMEOrderNotFound, ACMERequests,
+                                       ACMETimeoutFetchingCertificateError)
 from certcentral.x509 import (Certificate, CertificateSaveMode,
                               CertificateSigningRequest, ECPrivateKey,
                               PrivateKeyLoader, RSAPrivateKey,
@@ -119,13 +120,14 @@ class CertificateStatus(Enum):
     CHALLENGES_VALIDATED = 4  # Challenges have been successfully validated
     CHALLENGES_PUSHED = 5     # Challenges pushed to the ACME directory
     CHALLENGES_REJECTED = 6   # Challenges have been rejected by the ACME directory
-    CERTIFICATE_ISSUED = 7    # Certificate issued by the ACME directory but stilll not persisted on disk
-    VALID = 8                 # Valid certificate succesfully persisted on disk
-    NEEDS_RENEWAL = 9         # Valid certificate that needs to be renew soon!
-    EXPIRED = 10              # Expired certificate
-    SUBJECTS_CHANGED = 11     # Configuration of cert (CN/SANs) has changed, need to re-issue
-    CERTCENTRAL_ERROR = 12    # Certificate issuance failed due to some certcentral non-recoverable error
-    ACMEDIR_ERROR = 13        # Certificate issuance failed due to some ACME directory non-recoverable error
+    ORDER_FINALIZED = 7       # Order finalization request sent to the ACME directory
+    CERTIFICATE_ISSUED = 8    # Certificate issued by the ACME directory but still not persisted on disk
+    VALID = 9                 # Valid certificate succesfully persisted on disk
+    NEEDS_RENEWAL = 10        # Valid certificate that needs to be renew soon!
+    EXPIRED = 11              # Expired certificate
+    SUBJECTS_CHANGED = 12     # Configuration of cert (CN/SANs) has changed, need to re-issue
+    CERTCENTRAL_ERROR = 13    # Certificate issuance failed due to some certcentral non-recoverable error
+    ACMEDIR_ERROR = 14        # Certificate issuance failed due to some ACME directory non-recoverable error
 
 
 class CertificateState:
@@ -136,7 +138,8 @@ class CertificateState:
     STATUS_WITH_SLOW_RETRIES
     """
     STATUS_WITH_RETRIES = (CertificateStatus.CSR_PUSHED, CertificateStatus.CHALLENGES_VALIDATED,
-                           CertificateStatus.CHALLENGES_PUSHED, CertificateStatus.ACMEDIR_ERROR)
+                           CertificateStatus.CHALLENGES_PUSHED, CertificateStatus.ACMEDIR_ERROR,
+                           CertificateStatus.ORDER_FINALIZED)
     STATUS_WITH_SLOW_RETRIES = (CertificateStatus.CHALLENGES_REJECTED, CertificateStatus.CERTIFICATE_ISSUED,
                                 CertificateStatus.CERTCENTRAL_ERROR)
     MAX_CONSECUTIVE_RETRIES = 3
@@ -622,8 +625,8 @@ class CertCentral():
 
     def _handle_pushed_challenges(self, cert_id, key_type_id):  # pylint: disable=too-many-return-statements
         """Handles CHALLENGES_PUSHED status. Performs the following actions:
-            - Attempts to fetch the signed certificate from the ACME directory
-            - Persists the certificate on disk
+            - Attempts to finalize the ACME order.
+            - Passes the ball to the next status handler.
         """
         logger.info("Handling pushed challenges event for %s / %s", cert_id, key_type_id)
         try:
@@ -643,7 +646,7 @@ class CertCentral():
 
         session = self._get_acme_session(cert_details)
         try:
-            certificate = session.get_certificate(csr_id)
+            session.finalize_order(csr_id)
         except ACMEChallengeNotValidatedError:
             logger.warning("ACME Directory hasn't validated the challenge(s) yet for certificate %s / %s",
                            cert_id, key_type_id)
@@ -652,14 +655,53 @@ class CertCentral():
             logger.warning("ACME Directory has rejected the challenge(s) for certificate %s / %s",
                            cert_id, key_type_id)
             return CertificateStatus.CHALLENGES_REJECTED
-        except ACMEIssuedCertificateError:
-            logger.warning("Unable to handle certificate issued by the ACME directory for certificate %s / %s",
-                           cert_id, key_type_id)
-            return CertificateStatus.CERTIFICATE_ISSUED
         except ACMEOrderNotFound:
             logger.exception("Could not find ACME order when attempting to get the certificate %s / %s",
                              cert_id, key_type_id)
             return CertificateStatus.CERTCENTRAL_ERROR
+        except ACMEError:
+            logger.exception("Problem getting certificate for certificate %s / %s",
+                             cert_id, key_type_id)
+            return CertificateStatus.ACMEDIR_ERROR
+
+        status = CertificateStatus.ORDER_FINALIZED
+        status = self._handle_order_finalized(cert_id, key_type_id)
+
+        return status
+
+    def _handle_order_finalized(self, cert_id, key_type_id):
+        """Handles ORDER_FINALIZED status. Performs the following actions:
+            - Attempts to fetch the signed certificate from the ACME directory
+            - Persists the certificate on disk
+        """
+        logger.info("Handling order finalized event for %s / %s", cert_id, key_type_id)
+        try:
+            private_key = PrivateKeyLoader.load(self._get_path(cert_id, key_type_id, public=False, kind='new'))
+        except (OSError, X509Error):
+            logger.exception("Failed to load new private key for certificate %s / %s",
+                             cert_id, key_type_id)
+            return CertificateStatus.CERTCENTRAL_ERROR
+
+        cert_details = self.config.certificates[cert_id]
+
+        csr_id = CertificateSigningRequest.generate_csr_id(
+            public_key_pem=private_key.public_pem,
+            common_name=cert_details['CN'],
+            sans=cert_details['SNI'],
+        )
+
+        session = self._get_acme_session(cert_details)
+
+        try:
+            certificate = session.get_certificate(csr_id)
+        except ACMETimeoutFetchingCertificateError:
+            logger.exception("Unable to fetch certificate for an already finalized order for certificate %s / %s",
+                             cert_id, key_type_id)
+            return CertificateStatus.ORDER_FINALIZED
+        except ACMEIssuedCertificateError:
+            logger.warning("Unable to handle certificate issued by the ACME directory for certificate %s / %s",
+                           cert_id, key_type_id)
+            return CertificateStatus.CERTIFICATE_ISSUED
         except ACMEError:
             logger.exception("Problem getting certificate for certificate %s / %s",
                              cert_id, key_type_id)
@@ -721,6 +763,8 @@ class CertCentral():
                         new_status = self._handle_pushed_csr(cert_id, key_type_id)
                     elif cert_state.status is CertificateStatus.CHALLENGES_PUSHED:
                         new_status = self._handle_pushed_challenges(cert_id, key_type_id)
+                    elif cert_state.status is CertificateStatus.ORDER_FINALIZED:
+                        new_status = self._handle_order_finalized(cert_id, key_type_id)
                     else:
                         logger.error("Unexpected state: %s", cert_state.status)
                         continue

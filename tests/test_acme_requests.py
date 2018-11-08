@@ -192,6 +192,7 @@ class ACMEIntegrationTests(BasePebbleIntegrationTest):
         while True:
             self.assertTrue(session.orders)
             try:
+                session.finalize_order(csr.csr_id)
                 certificate = session.get_certificate(csr.csr_id)
                 break
             except ACMEChallengeNotValidatedError:
@@ -232,6 +233,7 @@ class ACMEIntegrationTests(BasePebbleIntegrationTest):
         while True:
             self.assertTrue(session.orders)
             try:
+                session.finalize_order(csr.csr_id)
                 certificate = session.get_certificate(csr.csr_id)
                 break
             except ACMEChallengeNotValidatedError:
@@ -271,6 +273,7 @@ class ACMEIntegrationTests(BasePebbleIntegrationTest):
         while True:
             self.assertTrue(session.orders)
             try:
+                session.finalize_order(csr.csr_id)
                 certificate = session.get_certificate(csr.csr_id)
                 break
             except ACMEChallengeNotValidatedError:

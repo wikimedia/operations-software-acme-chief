@@ -437,12 +437,18 @@ class ACMERequests:
             logger.error("ACME directory has rejected the challenge(s) for order %s", order.uri)
             self._clean(csr_id)
             raise ACMEInvalidChallengeError('Unable to get certificate')
+        except errors.Error as polling_error:
+            logger.error("ACME directory has returned a generic error while polling authorizations for order %s",
+                         order.uri)
+            self._clean(csr_id)
+            raise ACMEError('Unable to get certificate') from polling_error
+
+        try:
+            self.acme_client.only_finalize_order(polled_order)
         except errors.Error as finalize_error:
             logger.error("ACME directory has returned a generic finalization error for order %s", order.uri)
             self._clean(csr_id)
             raise ACMEError('Unable to get certificate') from finalize_error
-
-        self.acme_client.only_finalize_order(polled_order)
 
     def get_certificate(self, csr_id, deadline=None):
         """

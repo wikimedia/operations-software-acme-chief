@@ -1,3 +1,10 @@
+certcentral (0.7-1) stretch-wikimedia; urgency=medium
+
+  Fix finalize_order() exception handling
+  split base path in config and certificates path
+
+ -- Valentin Gutierrez <vgutierrez@wikimedia.org>  Thu, 15 Nov 2018 16:24:53 +0100
+
 certcentral (0.6-1) stretch-wikimedia; urgency=medium
 
   Log order URI on non-recoverable finalization errors

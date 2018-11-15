@@ -12,7 +12,7 @@ import stat
 import flask
 import yaml
 
-from certcentral.certcentral import (BASEPATH, KEY_TYPES, CertCentral,
+from certcentral.certcentral import (PATHS, KEY_TYPES, CertCentral,
                                      CertCentralConfig)
 
 REQUIRED_METADATA_PARAMETERS = {
@@ -46,11 +46,11 @@ def get_file_metadata(file_path, file_contents):
     }
 
 
-def create_app(base_path=BASEPATH, cert_central_config=None):
+def create_app(config_dir=PATHS['config'], certificates_dir=PATHS['certificates'], cert_central_config=None):
     """Creates the flask app with the embedded CertCentralConfig"""
     app = flask.Flask(__name__)
 
-    live_certs_path = os.path.join(base_path, CertCentral.live_certs_path)
+    live_certs_path = os.path.join(certificates_dir, CertCentral.live_certs_path)
 
     config_path = None
     confd_path = None
@@ -64,8 +64,8 @@ def create_app(base_path=BASEPATH, cert_central_config=None):
         state['config'] = CertCentralConfig.load(config_path, confd_path=confd_path)
 
     if state['config'] is None:
-        config_path = os.path.join(base_path, CertCentral.config_path)
-        confd_path = os.path.join(base_path, CertCentral.confd_path)
+        config_path = os.path.join(config_dir, CertCentral.config_path)
+        confd_path = os.path.join(config_dir, CertCentral.confd_path)
         signal.signal(signal.SIGHUP, sighup_handler)
         sighup_handler()
 

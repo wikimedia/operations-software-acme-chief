@@ -49,7 +49,10 @@ from certcentral.x509 import (Certificate, CertificateSaveMode,
 
 logger = logging.getLogger(__name__)  # pylint: disable=invalid-name
 
-BASEPATH = '/etc/certcentral'
+PATHS = {
+    'config': '/etc/certcentral',
+    'certificates': '/var/lib/certcentral',
+}
 KEY_TYPES = {
     'ec-prime256v1': {
         'class': ECPrivateKey,
@@ -283,17 +286,17 @@ class CertCentral():
     http_challenges_path = 'http_challenges'
     dns_challenges_path = 'dns_challenges'
 
-    def __init__(self, base_path=BASEPATH):
+    def __init__(self, config_path=PATHS['config'], certificates_path=PATHS['certificates']):
         self._configure_logging()
-        self.live_certs_path = os.path.join(base_path, CertCentral.live_certs_path)
-        self.new_certs_path = os.path.join(base_path, CertCentral.new_certs_path)
-        self.accounts_path = os.path.join(base_path, CertCentral.accounts_path)
-        self.csrs_path = os.path.join(base_path, CertCentral.csrs_path)
-        self.config_path = os.path.join(base_path, CertCentral.config_path)
-        self.confd_path = os.path.join(base_path, CertCentral.confd_path)
+        self.live_certs_path = os.path.join(certificates_path, CertCentral.live_certs_path)
+        self.new_certs_path = os.path.join(certificates_path, CertCentral.new_certs_path)
+        self.csrs_path = os.path.join(certificates_path, CertCentral.csrs_path)
+        self.accounts_path = os.path.join(config_path, CertCentral.accounts_path)
+        self.config_path = os.path.join(config_path, CertCentral.config_path)
+        self.confd_path = os.path.join(config_path, CertCentral.confd_path)
         self.challenges_path = {
-            ACMEChallengeType.DNS01: os.path.join(base_path, CertCentral.dns_challenges_path),
-            ACMEChallengeType.HTTP01: os.path.join(base_path, CertCentral.http_challenges_path),
+            ACMEChallengeType.DNS01: os.path.join(certificates_path, CertCentral.dns_challenges_path),
+            ACMEChallengeType.HTTP01: os.path.join(certificates_path, CertCentral.http_challenges_path),
         }
         self.config = None
         self.acme_sessions = dict()

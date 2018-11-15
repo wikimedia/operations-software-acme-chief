@@ -957,20 +957,24 @@ class CertCentralIntegrationTest(BasePebbleIntegrationTest):
         super().tearDownClass()
 
     def setUp(self):
-        self.temp_dir = tempfile.TemporaryDirectory()
-        base_path = self.temp_dir.name
-        self.acme_account_base_path = os.path.join(base_path, CertCentral.accounts_path)
-        for path in [CertCentral.accounts_path,
-                     CertCentral.new_certs_path,
+        self.config_dir = tempfile.TemporaryDirectory()
+        self.certificates_dir = tempfile.TemporaryDirectory()
+        config_path = self.config_dir.name
+        certificates_path = self.certificates_dir.name
+        self.acme_account_base_path = os.path.join(config_path, CertCentral.accounts_path)
+        for path in (CertCentral.accounts_path,
+                     CertCentral.confd_path):
+            os.makedirs(os.path.join(config_path, path))
+
+        for path in (CertCentral.new_certs_path,
                      CertCentral.live_certs_path,
                      CertCentral.csrs_path,
-                     CertCentral.confd_path,
                      CertCentral.dns_challenges_path,
-                     CertCentral.http_challenges_path]:
-            os.makedirs(os.path.join(base_path, path))
+                     CertCentral.http_challenges_path):
+            os.makedirs(os.path.join(certificates_path, path))
 
-        HTTP01ChallengeHandler.challenges_path = os.path.join(base_path, CertCentral.http_challenges_path)
-        BaseDNSRequestHandler.challenges_path = os.path.join(base_path, CertCentral.dns_challenges_path)
+        HTTP01ChallengeHandler.challenges_path = os.path.join(certificates_path, CertCentral.http_challenges_path)
+        BaseDNSRequestHandler.challenges_path = os.path.join(certificates_path, CertCentral.dns_challenges_path)
         proxy_host, proxy_port = self.proxy_server.server_address
         proxy_url = 'http://{}:{}'.format(proxy_host, proxy_port)
         dns_host, dns_port = self.dns_server.server_address
@@ -983,7 +987,8 @@ class CertCentralIntegrationTest(BasePebbleIntegrationTest):
             patcher.start()
 
     def tearDown(self):
-        self.temp_dir.cleanup()
+        self.config_dir.cleanup()
+        self.certificates_dir.cleanup()
         for patcher in self.patchers:
             patcher.stop()
 
@@ -998,7 +1003,7 @@ class CertCentralIntegrationTest(BasePebbleIntegrationTest):
                                      directory_url=DIRECTORY_URL)
         account.save()
         # Step 2 - Generate CertCentral config
-        cert_central = CertCentral(base_path=self.temp_dir.name)
+        cert_central = CertCentral(config_path=self.config_dir.name, certificates_path=self.certificates_dir.name)
         cert_central.config = CertCentralConfig(
             accounts=[{'id': account.account_id, 'directory': DIRECTORY_URL}],
             certificates={
@@ -1051,7 +1056,7 @@ class CertCentralIntegrationTest(BasePebbleIntegrationTest):
                                      directory_url=DIRECTORY_URL)
         account.save()
         # Step 2 - Generate CertCentral config
-        cert_central = CertCentral(base_path=self.temp_dir.name)
+        cert_central = CertCentral(config_path=self.config_dir.name, certificates_path=self.certificates_dir.name)
         cert_central.config = CertCentralConfig(
             accounts=[{'id': account.account_id, 'directory': DIRECTORY_URL}],
             certificates={
@@ -1104,7 +1109,7 @@ class CertCentralIntegrationTest(BasePebbleIntegrationTest):
                                      directory_url=DIRECTORY_URL)
         account.save()
         # Step 2 - Generate CertCentral config
-        cert_central = CertCentral(base_path=self.temp_dir.name)
+        cert_central = CertCentral(config_path=self.config_dir.name, certificates_path=self.certificates_dir.name)
         cert_central.config = CertCentralConfig(
             accounts=[{'id': account.account_id, 'directory': DIRECTORY_URL}],
             certificates={
@@ -1173,7 +1178,7 @@ class CertCentralIntegrationTest(BasePebbleIntegrationTest):
                                      directory_url=DIRECTORY_URL)
         account.save()
         # Step 2 - Generate CertCentral config
-        cert_central = CertCentral(base_path=self.temp_dir.name)
+        cert_central = CertCentral(config_path=self.config_dir.name, certificates_path=self.certificates_dir.name)
         cert_central.config = CertCentralConfig(
             accounts=[{'id': account.account_id, 'directory': DIRECTORY_URL}],
             certificates={
@@ -1241,7 +1246,7 @@ class CertCentralIntegrationTest(BasePebbleIntegrationTest):
                                      directory_url=DIRECTORY_URL)
         account.save()
         # Step 2 - Generate CertCentral config
-        cert_central = CertCentral(base_path=self.temp_dir.name)
+        cert_central = CertCentral(config_path=self.config_dir.name, certificates_path=self.certificates_dir.name)
         cert_central.config = CertCentralConfig(
             accounts=[{'id': account.account_id, 'directory': DIRECTORY_URL}],
             certificates={

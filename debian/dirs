@@ -1,8 +1,9 @@
 etc/certcentral
 etc/certcentral/conf.d
-etc/certcentral/new_certs
-etc/certcentral/live_certs
-etc/certcentral/http_challenges
-etc/certcentral/dns_challenges
-etc/certcentral/csrs
 etc/certcentral/accounts
+var/lib/certcentral
+var/lib/certcentral/new_certs
+var/lib/certcentral/live_certs
+var/lib/certcentral/http_challenges
+var/lib/certcentral/dns_challenges
+var/lib/certcentral/csrs

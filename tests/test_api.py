@@ -29,7 +29,8 @@ VALID_ROUTES = [
 
 class CertCentralApiTest(unittest.TestCase):
     def setUp(self):
-        self.base_path = tempfile.TemporaryDirectory()
+        self.config_path = tempfile.TemporaryDirectory()
+        self.certificates_path = tempfile.TemporaryDirectory()
         self.config = CertCentralConfig(
             accounts=[],
             certificates={
@@ -51,10 +52,13 @@ class CertCentralApiTest(unittest.TestCase):
             }
         )
         self._populate_files()
-        self.app = create_app(base_path=self.base_path.name, cert_central_config=self.config).test_client()
+        self.app = create_app(config_dir=self.config_path.name,
+                              certificates_dir=self.certificates_path.name,
+                              cert_central_config=self.config).test_client()
 
     def tearDown(self):
-        self.base_path.cleanup()
+        self.config_path.cleanup()
+        self.certificates_path.cleanup()
 
     @staticmethod
     def _get_valid_parts():
@@ -63,7 +67,7 @@ class CertCentralApiTest(unittest.TestCase):
                 yield file_name.format(key_type)
 
     def _populate_files(self):
-        live_certs_path = os.path.join(self.base_path.name, CertCentral.live_certs_path)
+        live_certs_path = os.path.join(self.certificates_path.name, CertCentral.live_certs_path)
         os.mkdir(live_certs_path, mode=0o700)
 
         for certname in self.config.certificates:
@@ -111,14 +115,15 @@ class CertCentralApiTest(unittest.TestCase):
     @mock.patch('signal.signal')
     @mock.patch.object(CertCentralConfig, 'load')
     def test_sighup(self, cert_central_config_load_mock, signal_mock):
-        app = create_app(base_path=self.base_path.name).test_client()
+        app = create_app(config_dir=self.config_path.name,
+                         certificates_dir=self.certificates_path.name).test_client()
         (sig, f), _ = signal_mock.call_args
         self.assertEqual(sig, signal.SIGHUP)
         cert_central_config_load_mock.reset_mock()
         f()  # simulate SIGHUP
 
-        config_path = os.path.join(self.base_path.name, CertCentral.config_path)
-        confd_path = os.path.join(self.base_path.name, CertCentral.confd_path)
+        config_path = os.path.join(self.config_path.name, CertCentral.config_path)
+        confd_path = os.path.join(self.config_path.name, CertCentral.confd_path)
 
         cert_central_config_load_mock.assert_called_once_with(config_path, confd_path=confd_path)
 
@@ -167,7 +172,7 @@ class CertCentralApiTest(unittest.TestCase):
             self.assertEqual(metadata['checksum']['value'], '{md5}' + FILE_MD5)
             self.assertEqual(metadata['mode'], 0o600)
             self.assertEqual(metadata['type'], 'file')
-            path = os.path.join(self.base_path.name,
+            path = os.path.join(self.certificates_path.name,
                                 CertCentral.live_certs_path,
                                 '{}.{}'.format(args['certname'], args['part']))
             self.assertEqual(metadata['path'], path)

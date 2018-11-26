@@ -67,6 +67,10 @@ class ACMEIssuedCertificateError(ACMEError):
     """Error handling the recently issued certificate"""
 
 
+class ACMETransportError(ACMEError):
+    """Error related to ACME transport protocol (HTTPS)"""
+
+
 class ACMEAccountFiles(Enum):
     """Files needed to persist an account"""
     KEY = 'private_key.pem'
@@ -286,6 +290,8 @@ class ACMEAccount:
             regr = acme.new_account(new_reg)
         except errors.Error as account_error:
             raise ACMEError('Unable to create ACME account') from account_error
+        except requests.exceptions.RequestException as request_error:
+            raise ACMETransportError('Unable to create ACME account') from request_error
 
         ret.regr = messages.RegistrationResource(body={}, uri=regr.uri)
 
@@ -337,6 +343,8 @@ class ACMERequests:
             regr = self.acme_client.update_registration(self.acme_account.regr)
         except errors.Error as update_error:
             raise ACMEError('Unable to verify ACME account status') from update_error
+        except requests.exceptions.RequestException as request_error:
+            raise ACMETransportError('Unable to verify ACME account status') from request_error
 
         return regr.body.status == 'valid'
 
@@ -386,6 +394,8 @@ class ACMERequests:
             new_order = self.acme_client.new_order(csr.pem)
         except errors.Error as order_error:
             raise ACMEError('Unable to push CSR') from order_error
+        except requests.exceptions.RequestException as request_error:
+            raise ACMETransportError('Unable to push CSR') from request_error
 
         self.orders[csr.csr_id] = new_order
 
@@ -415,6 +425,8 @@ class ACMERequests:
                     self.acme_client.answer_challenge(challenge, response)
                 except errors.Error as answer_challenge_error:
                     raise ACMEError('Unable to answer challenge') from answer_challenge_error
+                except requests.exceptions.RequestException as request_error:
+                    raise ACMETransportError('Unable to answer challenge') from request_error
 
     def finalize_order(self, csr_id, deadline=None):
         """
@@ -442,6 +454,8 @@ class ACMERequests:
                          order.uri)
             self._clean(csr_id)
             raise ACMEError('Unable to get certificate') from polling_error
+        except requests.exceptions.RequestException as request_error:
+            raise ACMETransportError('Unable to poll authorizations') from request_error
 
         try:
             self.acme_client.only_finalize_order(polled_order)
@@ -449,6 +463,8 @@ class ACMERequests:
             logger.error("ACME directory has returned a generic finalization error for order %s", order.uri)
             self._clean(csr_id)
             raise ACMEError('Unable to get certificate') from finalize_error
+        except requests.exceptions.RequestException as request_error:
+            raise ACMETransportError('Unable to finalize order') from request_error
 
     def get_certificate(self, csr_id, deadline=None):
         """
@@ -471,6 +487,8 @@ class ACMERequests:
         except errors.IssuanceError as issuance_error:
             self._clean(csr_id)
             raise ACMEError('Unable to get certificate') from issuance_error
+        except requests.exceptions.RequestException as request_error:
+            raise ACMETransportError('Unable to fetch certificate') from request_error
 
         self._clean(csr_id)
 
@@ -492,3 +510,5 @@ class ACMERequests:
             self.acme_client.revoke(jose.ComparableX509(openssl_cert), reason.value)
         except errors.Error as revoke_error:
             raise ACMEError('Unable to revoke certificate') from revoke_error
+        except requests.exceptions.RequestException as request_error:
+            raise ACMETransportError('Unable to revoke certificate') from request_error

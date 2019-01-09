@@ -116,7 +116,7 @@ def create_app(config_dir=PATHS['config'], certificates_dir=PATHS['certificates'
         if certname not in state['config'].certificates:
             abort(404, 'no such certname')
 
-        if client_dn not in state['config'].authorized_hosts[certname]:
+        if not state['config'].check_access(client_dn, certname):
             abort(403, 'access denied')
 
         fname = '{}.{}'.format(certname, part)

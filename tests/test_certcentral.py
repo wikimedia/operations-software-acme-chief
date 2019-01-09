@@ -43,12 +43,21 @@ certificates:
     SNI:
         - certcentraltest.beta.wmflabs.org
     challenge: http-01
+    authorized_hosts:
+        - deployment-certcentral-testclient03.deployment-prep.eqiad.wmflabs
   non_default_account_certificate:
     account: 621b49f9c6ccbbfbff9acb6e18f71205
     CN: 'test.wmflabs.org'
     SNI:
         - '*.test.wmflabs.org'
     challenge: dns-01
+  certificate_auth_by_regex:
+    CN: regex.test.wmflabs.org
+    SNI:
+        - regex.test.wmflabs.org
+    challenge: http-01
+    authorized_regexes:
+        - '^deployment-certcentral-testclient0[1-3]\.deployment-prep\.eqiad\.wmflabs$'
 challenges:
     dns-01:
         validation_dns_servers:
@@ -114,9 +123,13 @@ class CertCentralConfigTest(unittest.TestCase):
 
         config = CertCentralConfig.load(self.config_path, confd_path=self.confd_path)
         self.assertEqual(len(config.accounts), 2)
-        self.assertEqual(len(config.certificates), 2)
+        self.assertEqual(len(config.certificates), 3)
         self.assertEqual(config.default_account, 'ee566f9e436e120082f0770c0d58dd6d')
         self.assertIn('default_account_certificate', config.authorized_hosts)
+        self.assertIn('deployment-certcentral-testclient02.deployment-prep.eqiad.wmflabs',
+                      config.authorized_hosts['default_account_certificate'])
+        self.assertIn('deployment-certcentral-testclient03.deployment-prep.eqiad.wmflabs',
+                      config.authorized_hosts['default_account_certificate'])
         self.assertIn(ACMEChallengeType.DNS01, config.challenges)
         self.assertEqual(config.challenges[ACMEChallengeType.DNS01]['zone_update_cmd'], '/usr/bin/dns-update-zone')
         self.assertEqual(config.challenges[ACMEChallengeType.DNS01]['zone_update_cmd_timeout'], 30.5)
@@ -128,6 +141,25 @@ class CertCentralConfigTest(unittest.TestCase):
 
         config = CertCentralConfig.load(self.config_path, confd_path=self.confd_path)
         self.assertEqual(config.default_account, '621b49f9c6ccbbfbff9acb6e18f71205')
+
+    def test_access_check(self):
+        with open(self.config_path, 'w') as config_file:
+            config_file.write(VALID_CONFIG_EXAMPLE)
+
+        config = CertCentralConfig.load(self.config_path, confd_path=self.confd_path)
+        self.assertTrue(config.check_access('deployment-certcentral-testclient03.deployment-prep.eqiad.wmflabs',
+                                            'default_account_certificate'))
+        self.assertTrue(config.check_access('deployment-certcentral-testclient02.deployment-prep.eqiad.wmflabs',
+                                            'default_account_certificate'))
+        self.assertFalse(config.check_access('deployment-certcentral-testclient04.deployment-prep.eqiad.wmflabs',
+                                             'default_account_certificate'))
+
+        self.assertTrue(config.check_access('deployment-certcentral-testclient03.deployment-prep.eqiad.wmflabs',
+                                            'certificate_auth_by_regex'))
+        self.assertTrue(config.check_access('deployment-certcentral-testclient02.deployment-prep.eqiad.wmflabs',
+                                            'certificate_auth_by_regex'))
+        self.assertFalse(config.check_access('deployment-certcentral-testclient04.deployment-prep.eqiad.wmflabs',
+                                             'certificate_auth_by_regex'))
 
 
 class CertificateStateTest(unittest.TestCase):
@@ -210,6 +242,7 @@ class CertCentralTest(unittest.TestCase):
             authorized_hosts={
                 'test_certificate': ['localhost']
             },
+            authorized_regexes={},
             challenges={
                 'dns-01': {
                     'validation_dns_servers': ['127.0.0.1'],
@@ -488,6 +521,7 @@ class CertCentralStatusTransitionTests(unittest.TestCase):
             authorized_hosts={
                 'test_certificate': ['localhost']
             },
+            authorized_regexes={},
             challenges={
                 'dns-01': {
                     'validation_dns_servers': ['127.0.0.1'],
@@ -820,6 +854,7 @@ class CertCentralDetermineStatusTest(unittest.TestCase):
             authorized_hosts={
                 'test_certificate': ['localhost']
             },
+            authorized_regexes={},
             challenges={
                 'dns-01': {
                     'validation_dns_servers': ['127.0.0.1'],
@@ -1018,6 +1053,7 @@ class CertCentralIntegrationTest(BasePebbleIntegrationTest):
             authorized_hosts={
                 'test_certificate': ['localhost']
             },
+            authorized_regexes={},
             challenges={
                 'dns-01': {
                     'validation_dns_servers': ['127.0.0.1'],
@@ -1071,6 +1107,7 @@ class CertCentralIntegrationTest(BasePebbleIntegrationTest):
             authorized_hosts={
                 'test_certificate': ['localhost']
             },
+            authorized_regexes={},
             challenges={
                 'dns-01': {
                     'validation_dns_servers': ['localhost', '127.0.0.1'],
@@ -1124,6 +1161,7 @@ class CertCentralIntegrationTest(BasePebbleIntegrationTest):
             authorized_hosts={
                 'test_certificate': ['localhost']
             },
+            authorized_regexes={},
             challenges={
                 'dns-01': {
                     'validation_dns_servers': ['127.0.0.1'],
@@ -1193,6 +1231,7 @@ class CertCentralIntegrationTest(BasePebbleIntegrationTest):
             authorized_hosts={
                 'test_certificate': ['localhost']
             },
+            authorized_regexes={},
             challenges={
                 'dns-01': {
                     'validation_dns_servers': ['127.0.0.1'],
@@ -1261,6 +1300,7 @@ class CertCentralIntegrationTest(BasePebbleIntegrationTest):
             authorized_hosts={
                 'test_certificate': ['localhost']
             },
+            authorized_regexes={},
             challenges={
                 'dns-01': {
                     'validation_dns_servers': ['127.0.0.1'],

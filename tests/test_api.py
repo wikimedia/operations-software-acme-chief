@@ -1,5 +1,6 @@
 import mock
 import os
+import re
 import signal
 import tempfile
 import unittest
@@ -42,7 +43,10 @@ class CertCentralApiTest(unittest.TestCase):
             },
             default_account=None,
             authorized_hosts={
-                'test_certificate': ['localhost']
+                'test_certificate': {'localhost'}
+            },
+            authorized_regexes={
+                'test_certificate': [re.compile('^host[1-3]$')]
             },
             challenges={
                 'dns-01': {

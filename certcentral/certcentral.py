@@ -25,6 +25,7 @@ import copy
 import datetime
 import logging
 import logging.config
+import re
 import os
 import signal
 import subprocess
@@ -203,11 +204,12 @@ class CertificateState:
 
 class CertCentralConfig:
     """Class representing CertCentral configuration"""
-    def __init__(self, *, accounts, certificates, default_account, authorized_hosts, challenges):
+    def __init__(self, *, accounts, certificates, default_account, authorized_hosts, authorized_regexes, challenges):
         self.accounts = accounts
         self.certificates = certificates
         self.default_account = default_account
         self.authorized_hosts = authorized_hosts
+        self.authorized_regexes = authorized_regexes
         self.challenges = {}
         for challenge_type, challenge_config in challenges.items():
             if challenge_type == 'dns-01':
@@ -245,7 +247,10 @@ class CertCentralConfig:
 
         default_account = CertCentralConfig._get_default_account(config['accounts'])
 
-        authorized_hosts = collections.defaultdict(list)
+        authorized_hosts = collections.defaultdict(set)
+        authorized_regexes = collections.defaultdict(set)
+
+        # TODO: Consider getting rid of conf.d/ support in the future
         for fname in os.listdir(confd_path):
             file_path = os.path.join(confd_path, fname)
             logger.debug("Loading config file: %s", file_path)
@@ -255,12 +260,24 @@ class CertCentralConfig:
                     logger.warning("Certificate %s referenced on %s not found in general config",
                                    conf_data['certname'], file_path)
                     continue
-                authorized_hosts[conf_data['certname']].append(conf_data['hostname'])
+                authorized_hosts[conf_data['certname']].add(conf_data['hostname'])
+
+        for cert_name, cert_config in config['certificates'].items():
+            if 'authorized_hosts' in cert_config:
+                authorized_hosts[cert_name].update(cert_config['authorized_hosts'])
+            if 'authorized_regexes' in cert_config:
+                for regex in cert_config['authorized_regexes']:
+                    try:
+                        authorized_regexes[cert_name].add(re.compile(regex))
+                    except (re.error, TypeError):
+                        logger.warning("Ignoring invalid authorized regex %s for certificate %s", regex, cert_name)
+                        continue
 
         return CertCentralConfig(accounts=config['accounts'],
                                  certificates=config['certificates'],
                                  default_account=default_account,
-                                 authorized_hosts=authorized_hosts,
+                                 authorized_hosts=dict(authorized_hosts),
+                                 authorized_regexes=dict(authorized_regexes),
                                  challenges=config['challenges'])
 
     @staticmethod
@@ -270,6 +287,21 @@ class CertCentralConfig:
                 return account['id']
 
         return accounts[0]['id']
+
+    def check_access(self, hostname, cert_name):
+        """Returns True if hostname is allowed to fetch the specified certificate. False otherwise"""
+
+        if hostname in self.authorized_hosts.get(cert_name, ()):
+            return True
+
+        try:
+            for regex in self.authorized_regexes[cert_name]:
+                if regex.fullmatch(hostname) is not None:
+                    return True
+        except (KeyError, TypeError, re.error):
+            return False
+
+        return False
 
 
 class CertCentral():

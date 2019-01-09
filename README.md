@@ -41,6 +41,10 @@ certificates:
         SNI:
         - certcentraltest.beta.wmflabs.org
         challenge: http-01
+        authorized_hosts:
+        - cp1008.eqiad.wmnet
+        authorized_regexes:
+        - '^cp100[1-9]\.eqiad\.wmnet$'
 challenges:
     dns-01:
         validation_dns_servers:

@@ -293,7 +293,7 @@ class ACMEAccount:
         except requests.exceptions.RequestException as request_error:
             raise ACMETransportError('Unable to create ACME account') from request_error
 
-        ret.regr = messages.RegistrationResource(body={}, uri=regr.uri)
+        ret.regr = messages.RegistrationResource(body=regr.body, uri=regr.uri)
 
         return ret
 

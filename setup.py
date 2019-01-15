@@ -37,7 +37,7 @@ setuptools.setup(
         "Operating System :: OS Independent",
     ),
     install_requires=[
-        'acme >= 0.25.1, < 0.26.0',  # TODO: Why a maximum?
+        'acme >= 0.28.0',
         'cryptography >= 1.7.1',
         'dnspython >= 1.15.0',
         'flask >= 0.12.1',

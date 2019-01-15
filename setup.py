@@ -18,7 +18,7 @@ extras_require['tests-min'] = [dep.replace('>=', '==') for dep in extras_require
 
 setuptools.setup(
     name="certcentral",
-    version="0.7",
+    version="0.8",
     author="Alex Monk",
     author_email="krenair@gmail.com",
     description="Python application to request certificates from ACME servers and distribute to authorised clients.",

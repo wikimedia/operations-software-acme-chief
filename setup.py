@@ -41,7 +41,7 @@ setuptools.setup(
         'cryptography >= 1.7.1',
         'dnspython >= 1.15.0',
         'flask >= 0.12.1',
-        'josepy >= 1.0.1',
+        'josepy >= 1.1.0',
         'pyOpenSSL >= 16.2.0',
         'requests >= 2.18.4',
         'pyyaml >= 3.12'

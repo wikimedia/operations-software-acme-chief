@@ -1,3 +1,12 @@
+certcentral (0.8-1) stretch-wikimedia; urgency=medium
+
+  Handle TCP/HTTPS errors in ACME directory requests
+  Bump acme to the latest version shipped in stretch-backports
+  Bump josepy to the latest version shipped in stretch-backports
+  Allow specifying authorized hosts and regex in the config
+
+ -- Valentin Gutierrez <vgutierrez@wikimedia.org>  Thu, 17 Jan 2019 12:36:52 +0100
+
 certcentral (0.7-1) stretch-wikimedia; urgency=medium
 
   Fix finalize_order() exception handling

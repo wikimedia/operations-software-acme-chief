@@ -40,6 +40,7 @@ certificates:
         CN: certcentraltest.beta.wmflabs.org
         SNI:
         - certcentraltest.beta.wmflabs.org
+        staging_time: 3600
         challenge: http-01
         authorized_hosts:
         - cp1008.eqiad.wmnet

@@ -115,6 +115,8 @@ CHALLENGE_TYPES = {
 DEFAULT_DNS_ZONE_UPDATE_CMD = '/bin/echo'
 DEFAULT_DNS_ZONE_UPDATE_CMD_TIMEOUT = 60.0
 
+DEFAULT_CERTIFICATE_STAGING_TIME = 3600
+
 
 class CertificateStatus(Enum):
     """Certificate status definition"""
@@ -128,10 +130,11 @@ class CertificateStatus(Enum):
     CERTIFICATE_ISSUED = 8    # Certificate issued by the ACME directory but still not persisted on disk
     VALID = 9                 # Valid certificate succesfully persisted on disk
     NEEDS_RENEWAL = 10        # Valid certificate that needs to be renew soon!
-    EXPIRED = 11              # Expired certificate
-    SUBJECTS_CHANGED = 12     # Configuration of cert (CN/SANs) has changed, need to re-issue
-    CERTCENTRAL_ERROR = 13    # Certificate issuance failed due to some certcentral non-recoverable error
-    ACMEDIR_ERROR = 14        # Certificate issuance failed due to some ACME directory non-recoverable error
+    READY_TO_BE_PUSHED = 11   # New certificate issued and waiting to be pushed to CertCentral.live_certs_path
+    EXPIRED = 12              # Expired certificate
+    SUBJECTS_CHANGED = 13     # Configuration of cert (CN/SANs) has changed, need to re-issue
+    CERTCENTRAL_ERROR = 14    # Certificate issuance failed due to some certcentral non-recoverable error
+    ACMEDIR_ERROR = 15        # Certificate issuance failed due to some ACME directory non-recoverable error
 
 
 class CertificateState:
@@ -236,7 +239,7 @@ class CertCentralConfig:
             logger.warning('Missing dns-01 challenge configuration')
 
     @staticmethod
-    def load(file_name, confd_path=None):
+    def load(file_name, confd_path=None):  # pylint: disable=too-many-locals
         """Load a config from the specified file_name and an optional conf.d path"""
         logger.debug("Loading config file: %s", file_name)
         if confd_path is None:
@@ -263,6 +266,14 @@ class CertCentralConfig:
                 authorized_hosts[conf_data['certname']].add(conf_data['hostname'])
 
         for cert_name, cert_config in config['certificates'].items():
+            staging_time_seconds = cert_config.get('staging_time', DEFAULT_CERTIFICATE_STAGING_TIME)
+            try:
+                cert_config['staging_time'] = datetime.timedelta(seconds=int(staging_time_seconds))
+            except TypeError:
+                logger.warning("Ignoring invalid staging time %s for certificate %s. Using the default one: %s",
+                               staging_time_seconds, cert_name, DEFAULT_CERTIFICATE_STAGING_TIME)
+                cert_config['staging_time'] = datetime.timedelta(seconds=DEFAULT_CERTIFICATE_STAGING_TIME)
+
             if 'authorized_hosts' in cert_config:
                 authorized_hosts[cert_name].update(cert_config['authorized_hosts'])
             if 'authorized_regexes' in cert_config:
@@ -360,7 +371,15 @@ class CertCentral():
         """
         state = collections.defaultdict(dict)
 
-        def _get_certificate_status(cert_id, key_type_id, certificate):
+        def _get_certificate_status(cert_id, key_type_id, certificate):  # pylint: disable=too-many-return-statements
+            try:
+                new_cert_path = self._get_path(cert_id, key_type_id, public=True, kind='new', cert_type='full_chain')
+                new_cert = Certificate.load(new_cert_path)
+                if new_cert.certificate.not_valid_before > certificate.certificate.not_valid_before:
+                    return CertificateStatus.READY_TO_BE_PUSHED
+            except OSError:
+                pass
+
             if certificate.self_signed is True:
                 return CertificateStatus.SELF_SIGNED
 
@@ -749,6 +768,24 @@ class CertCentral():
             logger.exception("Problem persisting certificate %s / %s on disk", cert_id, key_type_id)
             return CertificateStatus.CERTIFICATE_ISSUED
 
+        return self._handle_ready_to_be_pushed(cert_id, key_type_id)
+
+    def _handle_ready_to_be_pushed(self, cert_id, key_type_id):
+        """Handles READY_TO_BE_PUSHED status. Performs the following actions:
+            - Checks if the certificate is ready to be pushed to live_certs_path
+            - Pushes the cerfificate iff it's ready to be pushed.
+        """
+        try:
+            cert = Certificate.load(self._get_path(cert_id, key_type_id,
+                                                   public=True, kind='new', cert_type='full_chain'))
+            staging_timedelta = self.config.certificates[cert_id]['staging_time']
+            if cert.certificate.not_valid_before >= (datetime.datetime.utcnow() - staging_timedelta):
+                return CertificateStatus.READY_TO_BE_PUSHED
+        except (OSError, X509Error):
+            logger.exception("Problem verifying not valid before date on certificate %s / %s",
+                             cert_id, key_type_id)
+            return CertificateStatus.CERTIFICATE_ISSUED
+
         return self._push_live_certificate(cert_id, key_type_id)
 
     def _push_live_certificate(self, cert_id, key_type_id):
@@ -800,6 +837,8 @@ class CertCentral():
                         new_status = self._handle_pushed_challenges(cert_id, key_type_id)
                     elif cert_state.status is CertificateStatus.ORDER_FINALIZED:
                         new_status = self._handle_order_finalized(cert_id, key_type_id)
+                    elif cert_state.status is CertificateStatus.READY_TO_BE_PUSHED:
+                        new_status = self._push_live_certificate(cert_id, key_type_id)
                     else:
                         logger.error("Unexpected state: %s", cert_state.status)
                         continue

@@ -51,6 +51,7 @@ certificates:
     SNI:
         - '*.test.wmflabs.org'
     challenge: dns-01
+    staging_time: 7200
   certificate_auth_by_regex:
     CN: regex.test.wmflabs.org
     SNI:
@@ -58,6 +59,7 @@ certificates:
     challenge: http-01
     authorized_regexes:
         - '^deployment-certcentral-testclient0[1-3]\.deployment-prep\.eqiad\.wmflabs$'
+    staging_time: 3600
 challenges:
     dns-01:
         validation_dns_servers:
@@ -80,12 +82,14 @@ certificates:
     SNI:
         - certcentraltest.beta.wmflabs.org
     challenge: http-01
+    staging_time: 3600
   non_default_account_certificate:
     account: 621b49f9c6ccbbfbff9acb6e18f71205
     CN: 'test.wmflabs.org'
     SNI:
         - '*.test.wmflabs.org'
     challenge: dns-01
+    staging_time: 3600
 challenges:
     dns-01:
         validation_dns_servers:
@@ -131,6 +135,10 @@ class CertCentralConfigTest(unittest.TestCase):
         self.assertIn('deployment-certcentral-testclient03.deployment-prep.eqiad.wmflabs',
                       config.authorized_hosts['default_account_certificate'])
         self.assertIn(ACMEChallengeType.DNS01, config.challenges)
+        self.assertEqual(config.certificates['default_account_certificate']['staging_time'],
+                         timedelta(seconds=3600))
+        self.assertEqual(config.certificates['non_default_account_certificate']['staging_time'],
+                         timedelta(seconds=7200))
         self.assertEqual(config.challenges[ACMEChallengeType.DNS01]['zone_update_cmd'], '/usr/bin/dns-update-zone')
         self.assertEqual(config.challenges[ACMEChallengeType.DNS01]['zone_update_cmd_timeout'], 30.5)
         access_mock.assert_called_once_with('/usr/bin/dns-update-zone', os.X_OK)
@@ -236,6 +244,7 @@ class CertCentralTest(unittest.TestCase):
                     'CN': 'certcentraltest.beta.wmflabs.org',
                     'SNI': ['certcentraltest.beta.wmflabs.org'],
                     'challenge': 'http-01',
+                    'staging_time': timedelta(seconds=3600),
                 },
             },
             default_account='1945e767ad72a532ebca519242a801bf',
@@ -509,12 +518,14 @@ class CertCentralStatusTransitionTests(unittest.TestCase):
                     'CN': 'certcentraltest.beta.wmflabs.org',
                     'SNI': ['certcentraltest.beta.wmflabs.org'],
                     'challenge': 'http-01',
+                    'staging_time': timedelta(seconds=3600),
                 },
                 'test_certificate_dns01':
                 {
                     'CN': 'certcentraltest.beta.wmflabs.org',
                     'SNI': ['certcentraltest.beta.wmflabs.org'],
                     'challenge': 'dns-01',
+                    'staging_time': timedelta(seconds=3600),
                 },
             },
             default_account='1945e767ad72a532ebca519242a801bf',
@@ -813,9 +824,9 @@ class CertCentralStatusTransitionTests(unittest.TestCase):
     @mock.patch.object(PrivateKeyLoader, 'load')
     @mock.patch('certcentral.certcentral.CertificateSigningRequest')
     @mock.patch.object(CertCentral, '_get_acme_session')
-    @mock.patch.object(CertCentral, '_push_live_certificate')
-    def test_handle_order_finalized(self, push_live_mock, get_acme_session_mock, csr_mock, pkey_loader_mock):
-        push_live_mock.return_value = CertificateStatus.VALID
+    @mock.patch.object(CertCentral, '_handle_ready_to_be_pushed')
+    def test_handle_order_finalized(self, handle_ready_mock, get_acme_session_mock, csr_mock, pkey_loader_mock):
+        handle_ready_mock.return_value = CertificateStatus.VALID
         status = self.instance._handle_order_finalized('test_certificate', 'rsa-2048')
         self.assertEqual(status, CertificateStatus.VALID)
         pkey_loader_calls = [mock.call(self.instance._get_path('test_certificate', 'rsa-2048',
@@ -831,7 +842,26 @@ class CertCentralStatusTransitionTests(unittest.TestCase):
                                                                  mode=CertificateSaveMode.FULL_CHAIN)
         ]
         get_acme_session_mock.assert_has_calls(acme_session_calls)
+        handle_ready_mock.assert_called_once_with('test_certificate', 'rsa-2048')
+
+    @mock.patch.object(Certificate, 'load')
+    @mock.patch.object(CertCentral, '_get_path')
+    @mock.patch.object(CertCentral, '_push_live_certificate')
+    def test_handle_ready_to_be_pushed(self, push_live_mock, get_path_mock, load_mock):
+        push_live_mock.return_value = CertificateStatus.VALID
+        load_mock.return_value.certificate.not_valid_before = datetime.fromtimestamp(0)
+        status = self.instance._handle_ready_to_be_pushed('test_certificate', 'rsa-2048')
+        self.assertEqual(status, CertificateStatus.VALID)
         push_live_mock.assert_called_once_with('test_certificate', 'rsa-2048')
+
+    @mock.patch.object(Certificate, 'load')
+    @mock.patch.object(CertCentral, '_get_path')
+    @mock.patch.object(CertCentral, '_push_live_certificate')
+    def test_handle_ready_to_be_pushed_not_ready(self, push_live_mock, get_path_mock, load_mock):
+        load_mock.return_value.certificate.not_valid_before = datetime.utcnow()
+        status = self.instance._handle_ready_to_be_pushed('test_certificate', 'rsa-2048')
+        self.assertEqual(status, CertificateStatus.READY_TO_BE_PUSHED)
+        push_live_mock.assert_not_called()
 
 
 class CertCentralDetermineStatusTest(unittest.TestCase):
@@ -848,6 +878,7 @@ class CertCentralDetermineStatusTest(unittest.TestCase):
                     'CN': 'certcentraltest.beta.wmflabs.org',
                     'SNI': ['certcentraltest.alpha.wmflabs.org', 'certcentraltest.beta.wmflabs.org'],
                     'challenge': 'http-01',
+                    'staging_time': timedelta(seconds=3600),
                 },
             },
             default_account='1945e767ad72a532ebca519242a801bf',
@@ -867,6 +898,8 @@ class CertCentralDetermineStatusTest(unittest.TestCase):
         return_value = mock.MagicMock()
         return_value.self_signed = False
 
+        return_value.certificate.not_valid_before = datetime(1970, 1, 1)
+
         if status is CertificateStatus.SELF_SIGNED:
             return_value.self_signed = True
         elif status is CertificateStatus.EXPIRED:
@@ -874,6 +907,8 @@ class CertCentralDetermineStatusTest(unittest.TestCase):
         elif status is CertificateStatus.NEEDS_RENEWAL:
             return_value.certificate.not_valid_after = datetime.utcnow() + timedelta(days=10)
             return_value.needs_renew.return_value = True
+        elif status is CertificateStatus.READY_TO_BE_PUSHED:
+            return_value.certificate.not_valid_before = datetime(2019, 1, 1)
         elif status is CertificateStatus.VALID:
             return_value.certificate.not_valid_after = datetime.utcnow() + timedelta(days=10)
             return_value.needs_renew.return_value = False
@@ -907,12 +942,38 @@ class CertCentralDetermineStatusTest(unittest.TestCase):
                     self.assertEqual(cert_status.status, test_status)
 
     @mock.patch.object(Certificate, 'load')
+    def test_initial_status_ready_to_be_pushed(self, load_mock):
+        load_mock.side_effect = [self._configure_load_return_value(CertificateStatus.VALID),
+                                 self._configure_load_return_value(CertificateStatus.READY_TO_BE_PUSHED),
+                                 self._configure_load_return_value(CertificateStatus.VALID),
+                                 self._configure_load_return_value(CertificateStatus.READY_TO_BE_PUSHED)]
+        status = self.instance._set_cert_status()
+        print(load_mock.mock_calls)
+        load_calls = [mock.call(self.instance._get_path('test_certificate', 'ec-prime256v1',
+                                                        public=True, kind='live')),
+                      mock.call(self.instance._get_path('test_certificate', 'ec-prime256v1',
+                                                        public=True, kind='new', cert_type='full_chain')),
+                      mock.call(self.instance._get_path('test_certificate', 'rsa-2048',
+                                                        public=True, kind='live')),
+                      mock.call(self.instance._get_path('test_certificate', 'rsa-2048',
+                                                        public=True, kind='new', cert_type='full_chain')),
+                     ]
+        load_mock.assert_has_calls(load_calls, any_order=True)
+        self.assertEqual(len(status), len(self.instance.config.certificates))
+        for certificate in self.instance.config.certificates:
+            self.assertEqual(len(status[certificate]), len(KEY_TYPES))
+            for cert_status in status[certificate].values():
+                self.assertEqual(cert_status.status, CertificateStatus.READY_TO_BE_PUSHED)
+
+
+    @mock.patch.object(Certificate, 'load')
     def test_trigger_subjects_changed_status(self, load_mock):
 
         def _generate_return_values():
             return_value = mock.MagicMock()
             return_value.self_signed = False
             return_value.needs_renew.return_value = False
+            return_value.certificate.not_valid_before = datetime.utcnow()
             return_value.certificate.not_valid_after = datetime.utcnow() + timedelta(days=10)
             return_value.common_name = 'certcentraltest.beta.wmflabs.org'
 
@@ -950,6 +1011,7 @@ class CertCentralDetermineStatusTest(unittest.TestCase):
             return_value = mock.MagicMock()
             return_value.self_signed = False
             return_value.needs_renew.return_value = False
+            return_value.certificate.not_valid_before = datetime.utcnow()
             return_value.certificate.not_valid_after = datetime.utcnow() + timedelta(days=10)
             return_value.common_name = 'certcentraltest.BETA.wmflabs.org'
             return_value.subject_alternative_names = ['certcentraltest.alpha.wmflabs.org',
@@ -1047,6 +1109,7 @@ class CertCentralIntegrationTest(BasePebbleIntegrationTest):
                     'CN': 'certcentraltest.beta.wmflabs.org',
                     'SNI': ['certcentraltest.beta.wmflabs.org'],
                     'challenge': 'http-01',
+                    'staging_time': timedelta(seconds=0),
                 },
             },
             default_account=account.account_id,
@@ -1101,6 +1164,7 @@ class CertCentralIntegrationTest(BasePebbleIntegrationTest):
                     'CN': 'certcentraltest.beta.wmflabs.org',
                     'SNI': ['certcentraltest.beta.wmflabs.org'],
                     'challenge': 'dns-01',
+                    'staging_time': timedelta(seconds=0),
                 },
             },
             default_account=account.account_id,
@@ -1155,6 +1219,7 @@ class CertCentralIntegrationTest(BasePebbleIntegrationTest):
                     'CN': 'certcentraltest.beta.wmflabs.org',
                     'SNI': ['certcentraltest.beta.wmflabs.org'],
                     'challenge': 'http-01',
+                    'staging_time': timedelta(seconds=0),
                 },
             },
             default_account=account.account_id,
@@ -1294,6 +1359,7 @@ class CertCentralIntegrationTest(BasePebbleIntegrationTest):
                     'CN': 'certcentraltest.beta.wmflabs.org',
                     'SNI': ['certcentraltest.beta.wmflabs.org'],
                     'challenge': 'http-01',
+                    'staging_time': timedelta(0),
                 },
             },
             default_account=account.account_id,

@@ -1,5 +1,5 @@
 """
-Central certificates service API
+ACMEChief service API
 Alex Monk <krenair@gmail.com>, May/June 2018
 Valentin Gutierrez <vgutierrez@wikimedia.org> 2018
 Wikimedia Foundation 2018
@@ -12,8 +12,8 @@ import stat
 import flask
 import yaml
 
-from certcentral.certcentral import (PATHS, KEY_TYPES, CertCentral,
-                                     CertCentralConfig)
+from acme_chief.acme_chief import (PATHS, KEY_TYPES, ACMEChief,
+                                   ACMEChiefConfig)
 
 REQUIRED_METADATA_PARAMETERS = {
     'checksum_type': 'md5',
@@ -46,26 +46,26 @@ def get_file_metadata(file_path, file_contents):
     }
 
 
-def create_app(config_dir=PATHS['config'], certificates_dir=PATHS['certificates'], cert_central_config=None):
-    """Creates the flask app with the embedded CertCentralConfig"""
+def create_app(config_dir=PATHS['config'], certificates_dir=PATHS['certificates'], acme_chief_config=None):
+    """Creates the flask app with the embedded ACMEChiefConfig"""
     app = flask.Flask(__name__)
 
-    live_certs_path = os.path.join(certificates_dir, CertCentral.live_certs_path)
+    live_certs_path = os.path.join(certificates_dir, ACMEChief.live_certs_path)
 
     config_path = None
     confd_path = None
-    state = {'config': cert_central_config}
+    state = {'config': acme_chief_config}
 
     def sighup_handler():
         """
         When receiving SIGHUP signals, reload config.
         """
         app.logger.info("SIGHUP received")
-        state['config'] = CertCentralConfig.load(config_path, confd_path=confd_path)
+        state['config'] = ACMEChiefConfig.load(config_path, confd_path=confd_path)
 
     if state['config'] is None:
-        config_path = os.path.join(config_dir, CertCentral.config_path)
-        confd_path = os.path.join(config_dir, CertCentral.confd_path)
+        config_path = os.path.join(config_dir, ACMEChief.config_path)
+        confd_path = os.path.join(config_dir, ACMEChief.confd_path)
         signal.signal(signal.SIGHUP, sighup_handler)
         sighup_handler()
 

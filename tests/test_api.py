@@ -7,9 +7,9 @@ import unittest
 
 import yaml
 
-from certcentral.certcentral import KEY_TYPES, CertCentral, CertCentralConfig
-from certcentral.api import create_app
-from certcentral.x509 import secure_opener
+from acme_chief.acme_chief import KEY_TYPES, ACMEChief, ACMEChiefConfig
+from acme_chief.api import create_app
+from acme_chief.x509 import secure_opener
 
 FILE_CONTENT = b'we do not care about the content'
 FILE_MD5 = '781646e7499e9219059ef9a1e7453f9c'
@@ -28,17 +28,17 @@ VALID_ROUTES = [
 ]
 
 
-class CertCentralApiTest(unittest.TestCase):
+class ACMEChiefApiTest(unittest.TestCase):
     def setUp(self):
         self.config_path = tempfile.TemporaryDirectory()
         self.certificates_path = tempfile.TemporaryDirectory()
-        self.config = CertCentralConfig(
+        self.config = ACMEChiefConfig(
             accounts=[],
             certificates={
                 'test_certificate':
                 {
-                    'CN': 'certcentraltest.beta.wmflabs.org',
-                    'SNI': ['certcentraltest.beta.wmflabs.org'],
+                    'CN': 'acmechieftest.beta.wmflabs.org',
+                    'SNI': ['acmechieftest.beta.wmflabs.org'],
                 },
             },
             default_account=None,
@@ -58,7 +58,7 @@ class CertCentralApiTest(unittest.TestCase):
         self._populate_files()
         self.app = create_app(config_dir=self.config_path.name,
                               certificates_dir=self.certificates_path.name,
-                              cert_central_config=self.config).test_client()
+                              acme_chief_config=self.config).test_client()
 
     def tearDown(self):
         self.config_path.cleanup()
@@ -71,7 +71,7 @@ class CertCentralApiTest(unittest.TestCase):
                 yield file_name.format(key_type)
 
     def _populate_files(self):
-        live_certs_path = os.path.join(self.certificates_path.name, CertCentral.live_certs_path)
+        live_certs_path = os.path.join(self.certificates_path.name, ACMEChief.live_certs_path)
         os.mkdir(live_certs_path, mode=0o700)
 
         for certname in self.config.certificates:
@@ -117,19 +117,19 @@ class CertCentralApiTest(unittest.TestCase):
             self.assertEqual(result.data, b'no such certname')
 
     @mock.patch('signal.signal')
-    @mock.patch.object(CertCentralConfig, 'load')
-    def test_sighup(self, cert_central_config_load_mock, signal_mock):
+    @mock.patch.object(ACMEChiefConfig, 'load')
+    def test_sighup(self, acme_chief_config_load_mock, signal_mock):
         app = create_app(config_dir=self.config_path.name,
                          certificates_dir=self.certificates_path.name).test_client()
         (sig, f), _ = signal_mock.call_args
         self.assertEqual(sig, signal.SIGHUP)
-        cert_central_config_load_mock.reset_mock()
+        acme_chief_config_load_mock.reset_mock()
         f()  # simulate SIGHUP
 
-        config_path = os.path.join(self.config_path.name, CertCentral.config_path)
-        confd_path = os.path.join(self.config_path.name, CertCentral.confd_path)
+        config_path = os.path.join(self.config_path.name, ACMEChief.config_path)
+        confd_path = os.path.join(self.config_path.name, ACMEChief.confd_path)
 
-        cert_central_config_load_mock.assert_called_once_with(config_path, confd_path=confd_path)
+        acme_chief_config_load_mock.assert_called_once_with(config_path, confd_path=confd_path)
 
     def test_access_denied(self):
         args = {
@@ -177,7 +177,7 @@ class CertCentralApiTest(unittest.TestCase):
             self.assertEqual(metadata['mode'], 0o600)
             self.assertEqual(metadata['type'], 'file')
             path = os.path.join(self.certificates_path.name,
-                                CertCentral.live_certs_path,
+                                ACMEChief.live_certs_path,
                                 '{}.{}'.format(args['certname'], args['part']))
             self.assertEqual(metadata['path'], path)
 

@@ -9,13 +9,14 @@ import tempfile
 import threading
 import time
 import unittest
+from copy import deepcopy
 from datetime import datetime, timedelta
 from urllib.parse import urlparse, urlunparse
 
 import dnslib
 import requests
 
-from certcentral.x509 import RSAPrivateKey, SelfSignedCertificate
+from acme_chief.x509 import RSAPrivateKey, SelfSignedCertificate
 
 PEBBLE_CMD_FLAGS = ['-strict=false']
 PEBBLE_ENV_VARS = {
@@ -187,7 +188,7 @@ class BasePebbleIntegrationTest(unittest.TestCase):
 
         cls.pebble_tempdir = tempfile.TemporaryDirectory()
 
-        env_vars = PEBBLE_ENV_VARS
+        env_vars = deepcopy(PEBBLE_ENV_VARS)
         cmd_flags = PEBBLE_CMD_FLAGS
         http_port = 5002
 

@@ -1,12 +1,12 @@
-# Certcentral
+# acme-chief
 
-Certcentral is a Python 3 application that is to be used to centrally request configured TLS
+acme-chief is a Python 3 application that is to be used to centrally request configured TLS
 certificates from ACME servers, then make them available to authorised API users. The API is
 intended to sit behind uwsgi and nginx running TLS client certificate checking based on a private
 CA. It can support http-01 and dns-01 challenges.
 
-Certcentral itself consists of two parts:
-* The backend in certcentral.py, which is responsible for generating initial certificates and then
+acme-chief itself consists of two parts:
+* The backend in acme_chief.py, which is responsible for generating initial certificates and then
   replacing them with live ones from the specified ACME server.
 * The API in api.py/uwsgi.py, which is responsible for taking requests from users,
   and distributing the certificates saved by the backend.
@@ -15,7 +15,7 @@ It is intended for use in multi-server environments where any one of several act
 shared filesystem are required to terminate TLS connections, where it is not feasible to have each
 server requesting their own certificates from ACME servers.
 
-One thing to note is that there are two stages when certcentral is outputting certificates: the
+One thing to note is that there are two stages when acme-chief is outputting certificates: the
 initial, self-signed certificate, and the trusted one issued through ACME. The initial stage is
 done to help with cases where servers need a dummy certificate to start up, which may be required
 in order to *get* the publicly-trusted certificates at all (thus resolving a chicken-and-egg
@@ -29,7 +29,7 @@ The license in use is GPL v3+ and the main developers are Alex Monk <krenair@gma
 Gutierrez <vgutierrez@wikimedia.org>.
 
 ## Configuration file example
-Certcentral expects its configuration file in /etc/certcentral/config.yaml by default
+acme-chief expects its configuration file in /etc/acme-chief/config.yaml by default
 ```yaml
 accounts:
 -
@@ -37,9 +37,9 @@ accounts:
     directory: "https://acme-v02.api.letsencrypt.org/directory"
 certificates:
     testing:
-        CN: certcentraltest.beta.wmflabs.org
+        CN: acmechieftest.beta.wmflabs.org
         SNI:
-        - certcentraltest.beta.wmflabs.org
+        - acmechieftest.beta.wmflabs.org
         staging_time: 3600
         challenge: http-01
         authorized_hosts:
@@ -56,8 +56,8 @@ challenges:
         zone_update_cmd_timeout: 60.0
 ```
 
-It also supports per-certificate configuration in /etc/certcentral/conf.d. conf.d file example:
+It also supports per-certificate configuration in /etc/acme-chief/conf.d. conf.d file example:
 ```yaml
 certname: default_account_certificate
-hostname: deployment-certcentral-testclient02.deployment-prep.eqiad.wmflabs
+hostname: deployment-acmechief-testclient02.deployment-prep.eqiad.wmflabs
 ```

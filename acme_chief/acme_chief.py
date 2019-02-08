@@ -35,24 +35,24 @@ from time import sleep
 import yaml
 from cryptography.hazmat.primitives.asymmetric import ec
 
-from certcentral.acme_requests import (ACMEAccount,
-                                       ACMEChallengeNotValidatedError,
-                                       ACMEChallengeType,
-                                       ACMEChallengeValidation, ACMEError,
-                                       ACMEInvalidChallengeError,
-                                       ACMEIssuedCertificateError,
-                                       ACMEOrderNotFound, ACMERequests,
-                                       ACMETimeoutFetchingCertificateError)
-from certcentral.x509 import (Certificate, CertificateSaveMode,
-                              CertificateSigningRequest, ECPrivateKey,
-                              PrivateKeyLoader, RSAPrivateKey,
-                              SelfSignedCertificate, X509Error)
+from acme_chief.acme_requests import (ACMEAccount,
+                                      ACMEChallengeNotValidatedError,
+                                      ACMEChallengeType,
+                                      ACMEChallengeValidation, ACMEError,
+                                      ACMEInvalidChallengeError,
+                                      ACMEIssuedCertificateError,
+                                      ACMEOrderNotFound, ACMERequests,
+                                      ACMETimeoutFetchingCertificateError)
+from acme_chief.x509 import (Certificate, CertificateSaveMode,
+                             CertificateSigningRequest, ECPrivateKey,
+                             PrivateKeyLoader, RSAPrivateKey,
+                             SelfSignedCertificate, X509Error)
 
 logger = logging.getLogger(__name__)  # pylint: disable=invalid-name
 
 PATHS = {
-    'config': '/etc/certcentral',
-    'certificates': '/var/lib/certcentral',
+    'config': '/etc/acme-chief',
+    'certificates': '/var/lib/acme-chief',
 }
 KEY_TYPES = {
     'ec-prime256v1': {
@@ -79,7 +79,7 @@ LOGGING_CONFIG = {
         },
     },
     'loggers': {
-        'certcentral': {
+        'acme_chief': {
             'handlers': ['console'],
             'level': 'INFO',
         },
@@ -130,10 +130,10 @@ class CertificateStatus(Enum):
     CERTIFICATE_ISSUED = 8    # Certificate issued by the ACME directory but still not persisted on disk
     VALID = 9                 # Valid certificate succesfully persisted on disk
     NEEDS_RENEWAL = 10        # Valid certificate that needs to be renew soon!
-    READY_TO_BE_PUSHED = 11   # New certificate issued and waiting to be pushed to CertCentral.live_certs_path
+    READY_TO_BE_PUSHED = 11   # New certificate issued and waiting to be pushed to ACMEChief.live_certs_path
     EXPIRED = 12              # Expired certificate
     SUBJECTS_CHANGED = 13     # Configuration of cert (CN/SANs) has changed, need to re-issue
-    CERTCENTRAL_ERROR = 14    # Certificate issuance failed due to some certcentral non-recoverable error
+    ACMECHIEF_ERROR = 14      # Certificate issuance failed due to some ACMEChief non-recoverable error
     ACMEDIR_ERROR = 15        # Certificate issuance failed due to some ACME directory non-recoverable error
 
 
@@ -148,7 +148,7 @@ class CertificateState:
                            CertificateStatus.CHALLENGES_PUSHED, CertificateStatus.ACMEDIR_ERROR,
                            CertificateStatus.ORDER_FINALIZED)
     STATUS_WITH_SLOW_RETRIES = (CertificateStatus.CHALLENGES_REJECTED, CertificateStatus.CERTIFICATE_ISSUED,
-                                CertificateStatus.CERTCENTRAL_ERROR)
+                                CertificateStatus.ACMECHIEF_ERROR)
     MAX_CONSECUTIVE_RETRIES = 3
     MAX_RETRIES = 16
     SLOW_RETRY = datetime.timedelta(days=1)
@@ -205,8 +205,8 @@ class CertificateState:
             self._next_retry = datetime.datetime.fromtimestamp(0)
 
 
-class CertCentralConfig:
-    """Class representing CertCentral configuration"""
+class ACMEChiefConfig:
+    """Class representing ACMEChief configuration"""
     def __init__(self, *, accounts, certificates, default_account, authorized_hosts, authorized_regexes, challenges):
         self.accounts = accounts
         self.certificates = certificates
@@ -248,7 +248,7 @@ class CertCentralConfig:
         with open(file_name) as config_file:
             config = yaml.safe_load(config_file)
 
-        default_account = CertCentralConfig._get_default_account(config['accounts'])
+        default_account = ACMEChiefConfig._get_default_account(config['accounts'])
 
         authorized_hosts = collections.defaultdict(set)
         authorized_regexes = collections.defaultdict(set)
@@ -284,12 +284,12 @@ class CertCentralConfig:
                         logger.warning("Ignoring invalid authorized regex %s for certificate %s", regex, cert_name)
                         continue
 
-        return CertCentralConfig(accounts=config['accounts'],
-                                 certificates=config['certificates'],
-                                 default_account=default_account,
-                                 authorized_hosts=dict(authorized_hosts),
-                                 authorized_regexes=dict(authorized_regexes),
-                                 challenges=config['challenges'])
+        return ACMEChiefConfig(accounts=config['accounts'],
+                               certificates=config['certificates'],
+                               default_account=default_account,
+                               authorized_hosts=dict(authorized_hosts),
+                               authorized_regexes=dict(authorized_regexes),
+                               challenges=config['challenges'])
 
     @staticmethod
     def _get_default_account(accounts):
@@ -315,7 +315,7 @@ class CertCentralConfig:
         return False
 
 
-class CertCentral():
+class ACMEChief():
     """
     This class just acts as a container for all the methods and state - config and authorized hosts
     data.
@@ -331,15 +331,15 @@ class CertCentral():
 
     def __init__(self, config_path=PATHS['config'], certificates_path=PATHS['certificates']):
         self._configure_logging()
-        self.live_certs_path = os.path.join(certificates_path, CertCentral.live_certs_path)
-        self.new_certs_path = os.path.join(certificates_path, CertCentral.new_certs_path)
-        self.csrs_path = os.path.join(certificates_path, CertCentral.csrs_path)
-        self.accounts_path = os.path.join(config_path, CertCentral.accounts_path)
-        self.config_path = os.path.join(config_path, CertCentral.config_path)
-        self.confd_path = os.path.join(config_path, CertCentral.confd_path)
+        self.live_certs_path = os.path.join(certificates_path, ACMEChief.live_certs_path)
+        self.new_certs_path = os.path.join(certificates_path, ACMEChief.new_certs_path)
+        self.csrs_path = os.path.join(certificates_path, ACMEChief.csrs_path)
+        self.accounts_path = os.path.join(config_path, ACMEChief.accounts_path)
+        self.config_path = os.path.join(config_path, ACMEChief.config_path)
+        self.confd_path = os.path.join(config_path, ACMEChief.confd_path)
         self.challenges_path = {
-            ACMEChallengeType.DNS01: os.path.join(certificates_path, CertCentral.dns_challenges_path),
-            ACMEChallengeType.HTTP01: os.path.join(certificates_path, CertCentral.http_challenges_path),
+            ACMEChallengeType.DNS01: os.path.join(certificates_path, ACMEChief.dns_challenges_path),
+            ACMEChallengeType.HTTP01: os.path.join(certificates_path, ACMEChief.http_challenges_path),
         }
         self.config = None
         self.acme_sessions = dict()
@@ -417,7 +417,7 @@ class CertCentral():
                     current_status = self.cert_status[cert_id][key_type_id]
                     if current_status in (CertificateStatus.CSR_PUSHED, CertificateStatus.CHALLENGES_PUSHED,
                                           CertificateStatus.CHALLENGES_REJECTED, CertificateStatus.CERTIFICATE_ISSUED,
-                                          CertificateStatus.CERTCENTRAL_ERROR, CertificateStatus.ACMEDIR_ERROR):
+                                          CertificateStatus.ACMECHIEF_ERROR, CertificateStatus.ACMEDIR_ERROR):
                         # we don't want to break the current cert. issue process
                         continue
                 except KeyError:
@@ -446,7 +446,7 @@ class CertCentral():
         It is also called once at the beginning to perform initial setup.
         """
         logger.info("SIGHUP received")
-        self.config = CertCentralConfig.load(file_name=self.config_path, confd_path=self.confd_path)
+        self.config = ACMEChiefConfig.load(file_name=self.config_path, confd_path=self.confd_path)
         if self.cert_status:
             previous_status = copy.deepcopy(self.cert_status)
         else:
@@ -565,7 +565,7 @@ class CertCentral():
         if challenge_type not in challenges:
             logger.warning("Unable to get required challenge type %s for certificate %s / %s",
                            challenge_type, cert_id, key_type_id)
-            return CertificateStatus.CERTCENTRAL_ERROR
+            return CertificateStatus.ACMECHIEF_ERROR
         try:
             for challenge in challenges[challenge_type]:
                 challenge.save(os.path.join(self.challenges_path[challenge_type],
@@ -573,13 +573,13 @@ class CertCentral():
         except OSError:
             logger.exception("OSError encountered while saving challenge type %s for certificate %s / %s",
                              challenge_type, cert_id, key_type_id)
-            return CertificateStatus.CERTCENTRAL_ERROR
+            return CertificateStatus.ACMECHIEF_ERROR
 
         if challenge_type == ACMEChallengeType.DNS01:
             if not self._trigger_dns_zone_update(challenges[challenge_type]):
                 logger.warning("Failed to perform DNS zone update for certificate %s / %s",
                                cert_id, key_type_id)
-                return CertificateStatus.CERTCENTRAL_ERROR
+                return CertificateStatus.ACMECHIEF_ERROR
 
         status = CertificateStatus.CSR_PUSHED
         status = self._handle_pushed_csr(cert_id, key_type_id)
@@ -597,7 +597,7 @@ class CertCentral():
         except (OSError, X509Error):
             logger.exception("Failed to load new private key for certificate %s / %s",
                              cert_id, key_type_id)
-            return CertificateStatus.CERTCENTRAL_ERROR
+            return CertificateStatus.ACMECHIEF_ERROR
 
         cert_details = self.config.certificates[cert_id]
 
@@ -616,7 +616,7 @@ class CertCentral():
         except KeyError:
             logger.exception("Could not find challenge for challenge type %s, certificate %s / %s",
                              challenge_type, cert_id, key_type_id)
-            return CertificateStatus.CERTCENTRAL_ERROR
+            return CertificateStatus.ACMECHIEF_ERROR
 
         for challenge in challenges:
             if challenge.challenge_type is ACMEChallengeType.DNS01:
@@ -646,7 +646,7 @@ class CertCentral():
         except (OSError, X509Error):
             logger.exception("Failed to load new private key for certificate %s / %s",
                              cert_id, key_type_id)
-            return CertificateStatus.CERTCENTRAL_ERROR
+            return CertificateStatus.ACMECHIEF_ERROR
 
         cert_details = self.config.certificates[cert_id]
 
@@ -664,14 +664,14 @@ class CertCentral():
             logger.exception("Could not find ACME order when pushing solved challenges for challenge type %s, "
                              "certificate %s / %s",
                              challenge_type, cert_id, key_type_id)
-            return CertificateStatus.CERTCENTRAL_ERROR
+            return CertificateStatus.ACMECHIEF_ERROR
 
         try:
             return self._handle_pushed_challenges(cert_id, key_type_id)
         except ACMEOrderNotFound:
             logger.exception("Could not find ACME order when handling pushed challenges for certificate %s / %s",
                              cert_id, key_type_id)
-            return CertificateStatus.CERTCENTRAL_ERROR
+            return CertificateStatus.ACMECHIEF_ERROR
         except ACMEError:
             logger.exception("ACMEError when handling pushed challenges for certificate %s / %s",
                              cert_id, key_type_id)
@@ -688,7 +688,7 @@ class CertCentral():
         except (OSError, X509Error):
             logger.exception("Failed to load new private key for certificate %s / %s",
                              cert_id, key_type_id)
-            return CertificateStatus.CERTCENTRAL_ERROR
+            return CertificateStatus.ACMECHIEF_ERROR
 
         cert_details = self.config.certificates[cert_id]
 
@@ -712,7 +712,7 @@ class CertCentral():
         except ACMEOrderNotFound:
             logger.exception("Could not find ACME order when attempting to get the certificate %s / %s",
                              cert_id, key_type_id)
-            return CertificateStatus.CERTCENTRAL_ERROR
+            return CertificateStatus.ACMECHIEF_ERROR
         except ACMEError:
             logger.exception("Problem getting certificate for certificate %s / %s",
                              cert_id, key_type_id)
@@ -734,7 +734,7 @@ class CertCentral():
         except (OSError, X509Error):
             logger.exception("Failed to load new private key for certificate %s / %s",
                              cert_id, key_type_id)
-            return CertificateStatus.CERTCENTRAL_ERROR
+            return CertificateStatus.ACMECHIEF_ERROR
 
         cert_details = self.config.certificates[cert_id]
 
@@ -828,7 +828,7 @@ class CertCentral():
                                                CertificateStatus.SUBJECTS_CHANGED,
                                                CertificateStatus.CHALLENGES_REJECTED,
                                                CertificateStatus.CERTIFICATE_ISSUED,
-                                               CertificateStatus.CERTCENTRAL_ERROR,
+                                               CertificateStatus.ACMECHIEF_ERROR,
                                                CertificateStatus.ACMEDIR_ERROR):
                         new_status = self._new_certificate(cert_id, key_type_id)
                     elif cert_state.status is CertificateStatus.CSR_PUSHED:
@@ -851,13 +851,13 @@ def main():
     """
     Main backend entry point.
     """
-    parser = argparse.ArgumentParser(description="""Runs the CertCentral backend. This is
+    parser = argparse.ArgumentParser(description="""Runs the ACMEChief backend. This is
     responsible for maintaining your configured certificates - creating dummy self-signed
     ones to start with, then having them replaced with ones from your ACME server. This does
-    not provide the CertCentral API.""")
+    not provide the ACMEChief API.""")
     parser.add_argument('--version', action='version', version='0.8')
     parser.parse_args()
-    CertCentral().run()
+    ACMEChief().run()
 
 
 if __name__ == '__main__':

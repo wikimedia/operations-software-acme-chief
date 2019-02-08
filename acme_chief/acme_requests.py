@@ -23,11 +23,11 @@ import requests
 from acme import client, errors, messages
 
 # TODO: move secure_opener out of x509
-from certcentral.x509 import (Certificate, CertificateRevokeReason,
-                              CertificateSigningRequest, PrivateKeyLoader,
-                              RSAPrivateKey, X509Error, secure_opener)
+from acme_chief.x509 import (Certificate, CertificateRevokeReason,
+                             CertificateSigningRequest, PrivateKeyLoader,
+                             RSAPrivateKey, X509Error, secure_opener)
 
-BASEPATH = '/etc/certcentral/accounts'
+BASEPATH = '/etc/acme-chief/accounts'
 DIRECTORY_URL = 'https://acme-v02.api.letsencrypt.org/directory'
 TLS_VERIFY = True   # intended to be used during testing
 DNS_PORT = 53       # intended to be used during testing
@@ -60,7 +60,7 @@ class ACMEChallengeNotValidatedError(ACMEError):
 
 class ACMETimeoutFetchingCertificateError(ACMEError):
     """Timeout AFTER sending the finalize request and BEFORE fetching the certificate.
-        Certcentral CANNOT send another finalize request after getting this error"""
+        ACMEChief CANNOT send another finalize request after getting this error"""
 
 
 class ACMEIssuedCertificateError(ACMEError):

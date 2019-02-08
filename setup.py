@@ -17,7 +17,7 @@ extras_require = {
 extras_require['tests-min'] = [dep.replace('>=', '==') for dep in extras_require['tests']]
 
 setuptools.setup(
-    name="certcentral",
+    name="acme-chief",
     version="0.8",
     author="Alex Monk",
     author_email="krenair@gmail.com",
@@ -28,7 +28,7 @@ setuptools.setup(
     packages=setuptools.find_packages(),
     entry_points={
         'console_scripts': [
-            'certcentral-backend = certcentral.certcentral:main'
+            'acme-chief-backend = acme_chief.acme_chief:main'
         ]
     },
     classifiers=(

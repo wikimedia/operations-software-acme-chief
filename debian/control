@@ -1,4 +1,4 @@
-Source: certcentral
+Source: acme-chief
 Maintainer: Alex Monk <krenair@gmail.com>
 Uploaders: Valentin Gutierrez <vgutierrez@wikimedia.org>
 Section: python
@@ -6,20 +6,20 @@ Priority: optional
 Build-Depends: python3-setuptools, python3-all, debhelper (>= 10), dh-exec, dh-python
 Standards-Version: 4.2.1
 
-Package: certcentral
+Package: acme-chief
 Architecture: all
 Depends: ${misc:Depends}, ${python3:Depends}, adduser
 Description: Python application to request certificates from ACME servers
- Certcentral is a Python 3 application that is to be used to centrally request
+ acme-chief is a Python 3 application that is to be used to centrally request
  configured TLS certificates from ACME servers, then make them available to
  authorised API users. The API is intended to sit behind uwsgi and nginx
  running TLS client certificate checking based on a private CA. It can support
  http-01 and dns-01 challenges.
- Certcentral itself consists of two parts:
- * The backend in certcentral.py, which is responsible for generating initial
+ acme-chief itself consists of two parts:
+ * The backend in acme_chief.py, which is responsible for generating initial
    certificates and then replacing them with live ones from the specified ACME
    server.
- * The API in certcentral_api.py/uwsgi.py, which is responsible for taking
+ * The API in api.py/uwsgi.py, which is responsible for taking
    requests from users, and distributing the certificates saved by the backend.
  It is intended for use in multi-server environments where any one of several
  actual servers with no shared filesystem are required to terminate TLS

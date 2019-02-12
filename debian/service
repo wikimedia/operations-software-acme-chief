@@ -1,10 +1,10 @@
 [Unit]
-Description=Central Certificates Service
+Description=acme-chief Service
 
 [Service]
-User=certcentral
-Group=certcentral
-ExecStart=/usr/bin/certcentral-backend
+User=acme-chief
+Group=acme-chief
+ExecStart=/usr/bin/acme-chief-backend
 ExecReload=/bin/kill -SIGHUP $MAINPID
 Restart=always
 [Install]

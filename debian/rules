@@ -1,7 +1,7 @@
 #!/usr/bin/make -f
 
 # The deb package will be named python3?-$PYBUILD_NAME
-export PYBUILD_NAME=certcentral
+export PYBUILD_NAME=acme-chief
 ## Uncomment these if you need to disable tests during deb build.
 ## Disable tests so we don't need test dependencies at build time.
 #export PYBUILD_DISABLE_python2.7=test
@@ -23,7 +23,7 @@ override_dh_auto_build:
 
 
 override_dh_auto_install:
-	python3 setup.py install --force --root=debian/certcentral --no-compile -O0 --install-layout=deb
+	python3 setup.py install --force --root=debian/acme-chief --no-compile -O0 --install-layout=deb
 
 
 
@@ -35,5 +35,5 @@ override_dh_python2:
 override_dh_installinit:
 	# We only have a systemd unit, not sysvinit.
 	# Can be removed in debhelper compat 11
-	dh_installinit -Ncertcentral
+	dh_installinit -Nacme-chief
 

@@ -1,3 +1,10 @@
+acme-chief (0.9-1) stretch-wikimedia; urgency=medium
+
+  Rename certcentral to acme-chief
+  Implement staging time
+
+ -- Valentin Gutierrez <vgutierrez@wikimedia.org>  Tue, 12 Feb 2019 09:37:10 +0100
+
 certcentral (0.8-1) stretch-wikimedia; urgency=medium
 
   Handle TCP/HTTPS errors in ACME directory requests

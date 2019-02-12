@@ -4,9 +4,9 @@ accounts:
     directory: "https://acme-v02.api.letsencrypt.org/directory"
 certificates:
     testing:
-        CN: certcentraltest.beta.wmflabs.org
+        CN: acmechieftest.beta.wmflabs.org
         SNI:
-        - certcentraltest.beta.wmflabs.org
+        - acmechieftest.beta.wmflabs.org
         challenge: http-01
 challenges:
     dns-01:

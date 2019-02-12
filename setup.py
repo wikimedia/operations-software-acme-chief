@@ -38,13 +38,13 @@ setuptools.setup(
     ),
     install_requires=[
         'acme >= 0.28.0',
-        'cryptography >= 1.7.1',
-        'dnspython >= 1.15.0',
-        'flask >= 0.12.1',
+        'cryptography >= 2.3',
+        'dnspython >= 1.16.0',
+        'flask >= 1.0.2',
         'josepy >= 1.1.0',
-        'pyOpenSSL >= 16.2.0',
-        'requests >= 2.18.4',
-        'pyyaml >= 3.12'
+        'pyOpenSSL >= 19.0.0',
+        'requests >= 2.20.0',
+        'pyyaml >= 3.13'
     ],
     extras_require=extras_require
 )

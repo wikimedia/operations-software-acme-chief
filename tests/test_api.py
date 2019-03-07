@@ -14,18 +14,29 @@ from acme_chief.x509 import secure_opener
 FILE_CONTENT = b'we do not care about the content'
 FILE_MD5 = '781646e7499e9219059ef9a1e7453f9c'
 
+CERT_VERSION = '32fb7e6f198e1b883d3691d5fc1b78d6'
+
 METADATA_QUERY_PARAMS = {
     'checksum_type': 'md5',
     'links': 'manage',
     'source_permissions': 'ignore',
 }
 
+METADATAS_QUERY_PARAMS = {
+    'recurse': 'true',
+}
+
 VALID_HEADERS = {'X_CLIENT_DN': 'CN=localhost'}
 
 VALID_ROUTES = [
     '/certs/{certname}/{part}',
+    '/certs/{certname}/{certversion}/{part}',
+    '/puppet/v3/file_{api}/acmedata/{certname}/{certversion}/{part}',
     '/puppet/v3/file_{api}/acmedata/{certname}/{part}',
 ]
+
+VALID_METADATA_ROUTE = '/puppet/v3/file_metadata/acmedata/{certname}'
+VALID_METADATAS_ROUTE = '/puppet/v3/file_metadatas/acmedata/{certname}'
 
 
 class ACMEChiefApiTest(unittest.TestCase):
@@ -74,14 +85,16 @@ class ACMEChiefApiTest(unittest.TestCase):
                 yield file_name.format(key_type)
 
     def _populate_files(self):
-        certs_path = os.path.join(self.certificates_path.name, ACMEChief.certs_path)
-        os.mkdir(certs_path, mode=0o700)
-
         for certname in self.config.certificates:
-            live_cert_path = os.path.join(certs_path, certname, ACMEChief.live_symlink_name)
-            os.makedirs(live_cert_path, mode=0o700)
+            cert_path = os.path.join(self.certificates_path.name, ACMEChief.certs_path, certname)
+            os.makedirs(cert_path, mode=0o700)
+            cert_version_path = os.path.join(cert_path, CERT_VERSION)
+            os.mkdir(cert_version_path, mode=0o700)
+            os.symlink(cert_version_path, os.path.join(cert_path, ACMEChief.live_symlink_name),
+                       target_is_directory=True)
+
             for part in self._get_valid_parts():
-                path = os.path.join(live_cert_path, part)
+                path = os.path.join(cert_version_path, part)
                 with open(path, 'wb', opener=secure_opener) as cert_file:
                     cert_file.write(FILE_CONTENT)
 
@@ -90,36 +103,45 @@ class ACMEChiefApiTest(unittest.TestCase):
             'certname': list(self.config.certificates.keys())[0],
             'part': 'ec-prime256v1.crt',
             'api': 'content',
+            'certversion': 'unknown',
         }
 
         for route in VALID_ROUTES:
-            result = self.app.get(route.format(**args))
-            self.assertEqual(result.status_code, 400)
-            self.assertEqual(result.data, b'missing mandatory headers')
+            fmt_route = route.format(**args)
+            result = self.app.get(fmt_route)
+            with self.subTest(route=fmt_route):
+                self.assertEqual(result.status_code, 400)
+                self.assertEqual(result.data, b'missing mandatory headers')
 
     def test_get_wrong_part(self):
         args = {
             'certname': list(self.config.certificates.keys())[0],
             'part': 'foobar',
             'api': 'content',
+            'certversion': 'unknown',
         }
 
         for route in VALID_ROUTES:
-            result = self.app.get(route.format(**args), headers=VALID_HEADERS)
-            self.assertEqual(result.status_code, 400)
-            self.assertIn(b'part must be in', result.data)
+            fmt_route = route.format(**args)
+            result = self.app.get(fmt_route, headers=VALID_HEADERS)
+            with self.subTest(route=fmt_route):
+                self.assertEqual(result.status_code, 400)
+                self.assertIn(b'part must be in', result.data)
 
     def test_get_unknown_certificate(self):
         args = {
             'certname': 'foo_certificate',
             'part': 'ec-prime256v1.crt',
             'api': 'content',
+            'certversion': 'live',
         }
 
         for route in VALID_ROUTES:
-            result = self.app.get(route.format(**args), headers=VALID_HEADERS)
-            self.assertEqual(result.status_code, 404)
-            self.assertEqual(result.data, b'no such certname')
+            url = route.format(**args)
+            result = self.app.get(url, headers=VALID_HEADERS)
+            with self.subTest(url=url):
+                self.assertEqual(result.status_code, 404)
+                self.assertEqual(result.data, b'no such certname')
 
     @mock.patch('signal.signal')
     @mock.patch.object(ACMEChiefConfig, 'load')
@@ -141,25 +163,31 @@ class ACMEChiefApiTest(unittest.TestCase):
             'certname': list(self.config.certificates.keys())[0],
             'part': 'ec-prime256v1.crt',
             'api': 'content',
+            'certversion': 'live',
         }
 
         for route in VALID_ROUTES:
-            result = self.app.get(route.format(**args), headers={'X_CLIENT_DN': 'CN=foo.bar.test'})
-            self.assertEqual(result.status_code, 403)
-            self.assertEqual(result.data, b'access denied')
+            fmt_route = route.format(**args)
+            result = self.app.get(fmt_route, headers={'X_CLIENT_DN': 'CN=foo.bar.test'})
+            with self.subTest(route=fmt_route):
+                self.assertEqual(result.status_code, 403)
+                self.assertEqual(result.data, b'access denied')
 
     def test_get_contents(self):
         args = {
             'certname': list(self.config.certificates.keys())[0],
             'api': 'content',
+            'certversion': CERT_VERSION,
         }
 
         for part in self._get_valid_parts():
             args['part'] = part
             for route in VALID_ROUTES:
-                result = self.app.get(route.format(**args), headers=VALID_HEADERS)
-                self.assertEqual(result.status_code, 200)
-                self.assertEqual(result.data, FILE_CONTENT)
+                fmt_route = route.format(**args)
+                result = self.app.get(fmt_route, headers=VALID_HEADERS)
+                with self.subTest(route=fmt_route):
+                    self.assertEqual(result.status_code, 200)
+                    self.assertEqual(result.data, FILE_CONTENT)
 
     # FIXME: we should be returning PSON data according to
     # https://puppet.com/docs/puppet/4.8/http_api/http_file_metadata.html#supported-response-formats
@@ -188,3 +216,64 @@ class ACMEChiefApiTest(unittest.TestCase):
 
         # when fixed, move this assert into the previous loop
         self.assertEqual(result.content_type, 'text/pson')
+
+    def test_get_directory_metadatas(self):
+        expected_metadata = {
+            'directory': [],
+            'file': [],
+            'link': [],
+        }
+        args = {
+            'certname': list(self.config.certificates.keys())[0],
+            'api': 'metadatas',
+        }
+        main_path = os.path.join(self.config.api['clients_root_directory'], args['certname'])
+        expected_metadata['directory'].append((main_path, '.')) # /certname
+        expected_metadata['directory'].append((main_path, CERT_VERSION)) # /certname/md5
+        expected_metadata['link'].append((main_path, 'live')) # /certname/live
+        expected_metadata['link'].append((main_path, 'new')) # /certname/new
+        for part in self._get_valid_parts():
+            expected_metadata['file'].append((main_path, os.path.join(CERT_VERSION, part))) # /certname/md5/part
+        url = VALID_METADATAS_ROUTE.format(**args)
+        result = self.app.get(url, headers=VALID_HEADERS, query_string=METADATAS_QUERY_PARAMS)
+        self.assertEqual(result.status_code, 200)
+        metadatas = yaml.safe_load(result.data)
+        for metadata in metadatas:
+            with self.subTest(metadata=metadata):
+                self.assertIn(metadata['type'], expected_metadata)
+                found = False
+                for expected in expected_metadata[metadata['type']]:
+                    if expected[0] == metadata['path'] and expected[1] == metadata['relative_path']:
+                        found = True
+                        break
+                self.assertTrue(found, "Unexpected metadata entry in file_metadatas response")
+                if metadata['type'] in ('link', 'directory'):
+                    self.assertEqual(metadata['checksum']['type'], 'ctime')
+                    if metadata['type'] == 'link':
+                        self.assertIsNotNone(metadata['destination'])
+
+    def test_get_directory_metadata(self):
+        args = {
+            'certname': list(self.config.certificates.keys())[0],
+        }
+
+        url = VALID_METADATA_ROUTE.format(**args)
+        result = self.app.get(url, headers=VALID_HEADERS, query_string=METADATA_QUERY_PARAMS)
+        self.assertEqual(result.status_code, 200)
+        metadata = yaml.safe_load(result.data)
+        self.assertEqual(metadata['type'], 'directory')
+        self.assertEqual(metadata['path'], os.path.join(self.config.api['clients_root_directory'], args['certname']))
+
+    def test_get_unknown_certversion(self):
+        args = {
+            'certname': list(self.config.certificates.keys())[0],
+            'api': 'metadata',
+            'certversion': 'unkown',
+        }
+        for part in self._get_valid_parts():
+            args['part'] = part
+            for route in VALID_ROUTES[1:3]:
+                url = route.format(**args)
+                result = self.app.get(url, headers=VALID_HEADERS, query_string=METADATA_QUERY_PARAMS)
+                with self.subTest(url=url):
+                    self.assertEqual(result.status_code, 404)

@@ -32,7 +32,7 @@ setuptools.setup(
         ]
     },
     classifiers=(
-        "Programming Language :: Python :: 3",
+        "Programming Language :: Python :: 3.7",
         "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
         "Operating System :: OS Independent",
     ),

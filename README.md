@@ -28,6 +28,9 @@ It is hoped that eventually this will be used to handle certificates for wikiped
 The license in use is GPL v3+ and the main developers are Alex Monk <krenair@gmail.com> and Valentin
 Gutierrez <vgutierrez@wikimedia.org>.
 
+## Requirements
+acme-chief requires python 3.7 or higher.
+
 ## Configuration file example
 acme-chief expects its configuration file in /etc/acme-chief/config.yaml by default
 ```yaml

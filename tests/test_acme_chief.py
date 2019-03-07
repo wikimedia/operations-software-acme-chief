@@ -18,6 +18,7 @@ from acme_chief.acme_requests import (ACMEAccount,
                                       ACMEIssuedCertificateError,
                                       DNS01ACMEChallenge)
 from acme_chief.acme_chief import (CERTIFICATE_TYPES,
+                                   CHALLENGE_TYPES,
                                    DEFAULT_DNS_ZONE_UPDATE_CMD,
                                    DEFAULT_DNS_ZONE_UPDATE_CMD_TIMEOUT,
                                    KEY_TYPES, ACMEChief, ACMEChiefConfig,
@@ -68,6 +69,8 @@ challenges:
             - 127.0.0.1
         zone_update_cmd: /usr/bin/dns-update-zone
         zone_update_cmd_timeout: 30.5
+api:
+    clients_root_directory: /etc/custom-root-directory
 '''
 
 VALID_CONFIG_EXAMPLE_WITHOUT_DEFAULT_ACCOUNT = '''
@@ -142,6 +145,7 @@ class ACMEChiefConfigTest(unittest.TestCase):
         self.assertEqual(config.challenges[ACMEChallengeType.DNS01]['zone_update_cmd'], '/usr/bin/dns-update-zone')
         self.assertEqual(config.challenges[ACMEChallengeType.DNS01]['zone_update_cmd_timeout'], 30.5)
         access_mock.assert_called_once_with('/usr/bin/dns-update-zone', os.X_OK)
+        self.assertEqual(config.api['clients_root_directory'], '/etc/custom-root-directory')
 
     def test_config_without_explicit_default(self):
         with open(self.config_path, 'w') as config_file:
@@ -257,6 +261,9 @@ class ACMEChiefTest(unittest.TestCase):
                     'validation_dns_servers': ['127.0.0.1'],
                     'sync_dns_servers': ['127.0.0.1'],
                 }
+            },
+            api={
+                'clients_root_directory': '/etc/acmecerts',
             }
         )
 
@@ -318,7 +325,9 @@ class ACMEChiefTest(unittest.TestCase):
 
     @mock.patch('acme_chief.acme_chief.SelfSignedCertificate')
     @mock.patch('acme_chief.acme_chief.Certificate')
-    def test_create_initial_tests(self, cert_mock, self_signed_cert_mock):
+    @mock.patch.object(ACMEChief, '_push_live_certificate')
+    @mock.patch.object(ACMEChief, '_create_new_certificate_version')
+    def test_create_initial_tests(self, certificate_version_mock, push_live_mock, cert_mock, self_signed_cert_mock):
         self.instance.cert_status = {'test_certificate': {
             'ec-prime256v1': CertificateState(CertificateStatus.VALID),
             'rsa-2048': CertificateState(CertificateStatus.INITIAL),
@@ -336,13 +345,14 @@ class ACMEChiefTest(unittest.TestCase):
         with mock.patch.dict('acme_chief.acme_chief.KEY_TYPES', {'ec-prime256v1': ec_key, 'rsa-2048': rsa_key}):
             self.instance.create_initial_certs()
 
+        certificate_version_mock.assert_called_once_with('test_certificate', key_type_id='rsa-2048')
         rsa_key_mock.assert_called_once()
         expected_key_calls = [mock.call(),
                               mock.call().generate(**KEY_TYPES['rsa-2048']['params']),
                               mock.call().save(self.instance._get_path('test_certificate',
                                                                         'rsa-2048',
                                                                         public=False,
-                                                                        kind='live'))]
+                                                                        kind='new'))]
         rsa_key_mock.assert_has_calls(expected_key_calls)
         ec_key_mock.assert_not_called()
         self_signed_cert_mock.assert_called_once()
@@ -353,18 +363,14 @@ class ACMEChiefTest(unittest.TestCase):
         self.assertFalse(kwargs['sans'])
         self.assertEqual(kwargs['private_key'], rsa_key_mock.return_value)
         self.assertLess(kwargs['until_date'] - kwargs['from_date'], timedelta(days=7))
-        cert_mock.assert_has_calls([mock.call(self_signed_cert_pem)] + [
-            mock.call().save(
-                self.instance._get_path('test_certificate',
-                                        'rsa-2048',
-                                        public=True,
-                                        kind='live',
-                                        cert_type=cert_type
-                ),
-                mode=cert_type_details['save_mode']
-            )
-            for cert_type, cert_type_details in CERTIFICATE_TYPES.items()
-        ])
+        cert_mock.assert_has_calls([mock.call(self_signed_cert_pem),
+                                    mock.call().save(
+                                    self.instance._get_path('test_certificate',
+                                    'rsa-2048',
+                                    public=True,
+                                    kind='new',
+                                    cert_type='full_chain'), mode=CertificateSaveMode.FULL_CHAIN)])
+        push_live_mock.assert_called_once_with('test_certificate')
 
     @mock.patch.object(ACMEAccount, 'load')
     @mock.patch('acme_chief.acme_chief.ACMERequests')
@@ -386,12 +392,12 @@ class ACMEChiefTest(unittest.TestCase):
     def test_push_live_certificate_exceptions(self, get_path_mock, certificate_load_mock, pkey_load_mock):
         for side_effect in [OSError, X509Error]:
             pkey_load_mock.side_effect = side_effect
-            status = self.instance._push_live_certificate('test_certificate', 'rsa-2048')
+            status = self.instance._push_live_certificate('test_certificate')
             self.assertEqual(status, CertificateStatus.CERTIFICATE_ISSUED)
 
         for side_effect in [OSError, X509Error]:
             certificate_load_mock.side_effect = side_effect
-            status = self.instance._push_live_certificate('test_certificate', 'rsa-2048')
+            status = self.instance._push_live_certificate('test_certificate')
             self.assertEqual(status, CertificateStatus.CERTIFICATE_ISSUED)
 
 
@@ -539,6 +545,9 @@ class ACMEChiefStatusTransitionTests(unittest.TestCase):
                     'sync_dns_servers': ['127.0.0.1'],
                     'zone_update_cmd': '/usr/bin/update-zone-dns',
                 }
+            },
+            api={
+                'clients_root_directory': '/etc/acmecerts',
             }
         )
 
@@ -567,7 +576,8 @@ class ACMEChiefStatusTransitionTests(unittest.TestCase):
     @mock.patch('acme_chief.acme_chief.CertificateSigningRequest')
     @mock.patch.object(ACMEChief, '_get_acme_session')
     @mock.patch.object(ACMEChief, '_handle_pushed_csr')
-    def test_new_certificate(self, handle_pushed_csr_mock, get_acme_session_mock, csr_mock):
+    @mock.patch.object(ACMEChief, '_create_new_certificate_version')
+    def test_new_certificate(self, certificate_version_mock, handle_pushed_csr_mock, get_acme_session_mock, csr_mock):
         handle_pushed_csr_mock.return_value = CertificateStatus.VALID
         http_challenge_mock = mock.MagicMock()
         http_challenge_mock.file_name = 'mocked_challenged_file_name'
@@ -575,6 +585,8 @@ class ACMEChiefStatusTransitionTests(unittest.TestCase):
             ACMEChallengeType.HTTP01: [http_challenge_mock],
         }
         status = self.instance._new_certificate('test_certificate', 'ec-prime256v1')
+
+        certificate_version_mock.assert_called_once_with('test_certificate', key_type_id='ec-prime256v1')
 
         csr_mock.assert_called_once_with(common_name='acmechieftest.beta.wmflabs.org',
                                          private_key=self.ec_key_mock.return_value,
@@ -600,7 +612,9 @@ class ACMEChiefStatusTransitionTests(unittest.TestCase):
     @mock.patch.object(ACMEChief, '_trigger_dns_zone_update')
     @mock.patch.object(ACMEChief, '_get_acme_session')
     @mock.patch.object(ACMEChief, '_handle_pushed_csr')
-    def test_new_certificate_dns01(self, handle_pushed_csr_mock, get_acme_session_mock, dns_zone_update_mock, csr_mock):
+    @mock.patch.object(ACMEChief, '_create_new_certificate_version')
+    def test_new_certificate_dns01(self, certificate_version_mock,
+                                   handle_pushed_csr_mock, get_acme_session_mock, dns_zone_update_mock, csr_mock):
         handle_pushed_csr_mock.return_value = CertificateStatus.VALID
         dns_challenge_mock = mock.MagicMock()
         dns_challenge_mock.file_name = 'mocked_challenged_file_name'
@@ -608,6 +622,8 @@ class ACMEChiefStatusTransitionTests(unittest.TestCase):
             ACMEChallengeType.DNS01: [dns_challenge_mock],
         }
         status = self.instance._new_certificate('test_certificate_dns01', 'ec-prime256v1')
+
+        certificate_version_mock.assert_called_once_with('test_certificate_dns01', key_type_id='ec-prime256v1')
 
         csr_mock.assert_called_once_with(common_name='acmechieftest.beta.wmflabs.org',
                                          private_key=self.ec_key_mock.return_value,
@@ -632,11 +648,14 @@ class ACMEChiefStatusTransitionTests(unittest.TestCase):
 
     @mock.patch('acme_chief.acme_chief.CertificateSigningRequest')
     @mock.patch.object(ACMEChief, '_get_acme_session')
-    def test_new_certificate_new_order_ready(self, get_acme_session_mock, csr_mock):
+    @mock.patch.object(ACMEChief, '_create_new_certificate_version')
+    def test_new_certificate_new_order_ready(self, new_certificate_mock, get_acme_session_mock, csr_mock):
         dns_challenge_mock = mock.MagicMock()
         dns_challenge_mock.file_name = 'mocked_challenged_file_name'
         get_acme_session_mock.return_value.push_csr.return_value = {}
         status = self.instance._new_certificate('test_certificate_dns01', 'ec-prime256v1')
+
+        new_certificate_mock.assert_called_once_with('test_certificate_dns01', key_type_id='ec-prime256v1')
 
         csr_mock.assert_called_once_with(common_name='acmechieftest.beta.wmflabs.org',
                                          private_key=self.ec_key_mock.return_value,
@@ -852,7 +871,7 @@ class ACMEChiefStatusTransitionTests(unittest.TestCase):
         load_mock.return_value.certificate.not_valid_before = datetime.fromtimestamp(0)
         status = self.instance._handle_ready_to_be_pushed('test_certificate', 'rsa-2048')
         self.assertEqual(status, CertificateStatus.VALID)
-        push_live_mock.assert_called_once_with('test_certificate', 'rsa-2048')
+        push_live_mock.assert_called_once_with('test_certificate')
 
     @mock.patch.object(Certificate, 'load')
     @mock.patch.object(ACMEChief, '_get_path')
@@ -891,6 +910,9 @@ class ACMEChiefDetermineStatusTest(unittest.TestCase):
                     'validation_dns_servers': ['127.0.0.1'],
                     'sync_dns_servers': ['127.0.0.1'],
                 }
+            },
+            api={
+                'clients_root_directory': '/etc/acmecerts',
             }
         )
 
@@ -948,7 +970,6 @@ class ACMEChiefDetermineStatusTest(unittest.TestCase):
                                  self._configure_load_return_value(CertificateStatus.VALID),
                                  self._configure_load_return_value(CertificateStatus.READY_TO_BE_PUSHED)]
         status = self.instance._set_cert_status()
-        print(load_mock.mock_calls)
         load_calls = [mock.call(self.instance._get_path('test_certificate', 'ec-prime256v1',
                                                         public=True, kind='live')),
                       mock.call(self.instance._get_path('test_certificate', 'ec-prime256v1',
@@ -1063,8 +1084,7 @@ class ACMEChiefIntegrationTest(BasePebbleIntegrationTest):
                      ACMEChief.confd_path):
             os.makedirs(os.path.join(config_path, path))
 
-        for path in (ACMEChief.new_certs_path,
-                     ACMEChief.live_certs_path,
+        for path in (ACMEChief.certs_path,
                      ACMEChief.csrs_path,
                      ACMEChief.dns_challenges_path,
                      ACMEChief.http_challenges_path):
@@ -1093,112 +1113,68 @@ class ACMEChiefIntegrationTest(BasePebbleIntegrationTest):
     @mock.patch('acme_chief.acme_requests.TLS_VERIFY', False)
     @mock.patch('signal.signal')
     @mock.patch.object(ACMEChief, 'sighup_handler')
-    def test_issue_new_certificate_http01(self, a, b):
-        # Step 1 - create an ACME account
-        account = ACMEAccount.create('tests-acmechief@wikimedia.org',
-                                     base_path=self.acme_account_base_path,
-                                     directory_url=DIRECTORY_URL)
-        account.save()
-        # Step 2 - Generate ACMEChief config
-        acme_chief = ACMEChief(config_path=self.config_dir.name, certificates_path=self.certificates_dir.name)
-        acme_chief.config = ACMEChiefConfig(
-            accounts=[{'id': account.account_id, 'directory': DIRECTORY_URL}],
-            certificates={
-                'test_certificate':
-                {
-                    'CN': 'acmechieftest.beta.wmflabs.org',
-                    'SNI': ['acmechieftest.beta.wmflabs.org'],
-                    'challenge': 'http-01',
-                    'staging_time': timedelta(seconds=0),
+    def test_issue_new_certificate(self, a, b):
+        for challenge in CHALLENGE_TYPES.keys():
+            # Step 1 - create an ACME account
+            account = ACMEAccount.create('tests-acmechief@wikimedia.org',
+                                        base_path=self.acme_account_base_path,
+                                        directory_url=DIRECTORY_URL)
+            account.save()
+            # Step 2 - Generate ACMEChief config
+            acme_chief = ACMEChief(config_path=self.config_dir.name, certificates_path=self.certificates_dir.name)
+            acme_chief.config = ACMEChiefConfig(
+                accounts=[{'id': account.account_id, 'directory': DIRECTORY_URL}],
+                certificates={
+                    'test_certificate':
+                    {
+                        'CN': 'acmechieftest.beta.wmflabs.org',
+                        'SNI': ['acmechieftest.beta.wmflabs.org'],
+                        'challenge': challenge,
+                        'staging_time': timedelta(seconds=0),
+                    },
                 },
-            },
-            default_account=account.account_id,
-            authorized_hosts={
-                'test_certificate': ['localhost']
-            },
-            authorized_regexes={},
-            challenges={
-                'dns-01': {
-                    'validation_dns_servers': ['127.0.0.1'],
-                    'sync_dns_servers': ['127.0.0.1'],
-                }
-            }
-        )
-        acme_chief.cert_status = {'test_certificate': {
-            'ec-prime256v1': CertificateState(CertificateStatus.INITIAL),
-            'rsa-2048': CertificateState(CertificateStatus.INITIAL),
-        }}
-
-        # Step 3 - Generate self signed certificates
-        acme_chief.create_initial_certs()
-        for cert_id in acme_chief.cert_status:
-            for key_type_id in KEY_TYPES:
-                self.assertEqual(acme_chief.cert_status[cert_id][key_type_id].status, CertificateStatus.SELF_SIGNED)
-                cert = Certificate.load(acme_chief._get_path(cert_id, key_type_id, public=True, kind='live'))
-                self.assertTrue(cert.self_signed)
-
-        # Step 4 - Request new certificates
-        for cert_id in acme_chief.cert_status:
-            for key_type_id in KEY_TYPES:
-                status = acme_chief._new_certificate(cert_id, key_type_id)
-                self.assertEqual(status, CertificateStatus.VALID)
-                cert = Certificate.load(acme_chief._get_path(cert_id, key_type_id, public=True, kind='live'))
-                self.assertFalse(cert.self_signed)
-
-    @mock.patch('acme_chief.acme_requests.TLS_VERIFY', False)
-    @mock.patch('signal.signal')
-    @mock.patch.object(ACMEChief, 'sighup_handler')
-    def test_issue_new_certificate_dns01(self, a, b):
-        # Step 1 - create an ACME account
-        account = ACMEAccount.create('tests-acmechief@wikimedia.org',
-                                     base_path=self.acme_account_base_path,
-                                     directory_url=DIRECTORY_URL)
-        account.save()
-        # Step 2 - Generate ACMEChief config
-        acme_chief = ACMEChief(config_path=self.config_dir.name, certificates_path=self.certificates_dir.name)
-        acme_chief.config = ACMEChiefConfig(
-            accounts=[{'id': account.account_id, 'directory': DIRECTORY_URL}],
-            certificates={
-                'test_certificate':
-                {
-                    'CN': 'acmechieftest.beta.wmflabs.org',
-                    'SNI': ['acmechieftest.beta.wmflabs.org'],
-                    'challenge': 'dns-01',
-                    'staging_time': timedelta(seconds=0),
+                default_account=account.account_id,
+                authorized_hosts={
+                    'test_certificate': ['localhost']
                 },
-            },
-            default_account=account.account_id,
-            authorized_hosts={
-                'test_certificate': ['localhost']
-            },
-            authorized_regexes={},
-            challenges={
-                'dns-01': {
-                    'validation_dns_servers': ['localhost', '127.0.0.1'],
-                    'sync_dns_servers': ['127.0.0.1'],
+                authorized_regexes={},
+                challenges={
+                    'dns-01': {
+                        'validation_dns_servers': ['127.0.0.1'],
+                        'sync_dns_servers': ['127.0.0.1'],
+                    }
+                },
+                api={
+                    'clients_root_directory': '/etc/acmecerts',
                 }
-            }
-        )
-        acme_chief.cert_status = {'test_certificate': {
-            'ec-prime256v1': CertificateState(CertificateStatus.INITIAL),
-            'rsa-2048': CertificateState(CertificateStatus.INITIAL),
-        }}
+            )
+            acme_chief.cert_status = {'test_certificate': {
+                'ec-prime256v1': CertificateState(CertificateStatus.INITIAL),
+                'rsa-2048': CertificateState(CertificateStatus.INITIAL),
+            }}
 
-        # Step 3 - Generate self signed certificates
-        acme_chief.create_initial_certs()
-        for cert_id in acme_chief.cert_status:
-            for key_type_id in KEY_TYPES:
-                self.assertEqual(acme_chief.cert_status[cert_id][key_type_id].status, CertificateStatus.SELF_SIGNED)
-                cert = Certificate.load(acme_chief._get_path(cert_id, key_type_id, public=True, kind='live'))
-                self.assertTrue(cert.self_signed)
+            # Step 3 - Generate self signed certificates
+            acme_chief.create_initial_certs()
+            for cert_id in acme_chief.cert_status:
+                for key_type_id in KEY_TYPES:
+                    with self.subTest(challenge=challenge, step=3):
+                        self.assertEqual(acme_chief.cert_status[cert_id][key_type_id].status,
+                                         CertificateStatus.SELF_SIGNED)
+                        cert = Certificate.load(acme_chief._get_path(cert_id, key_type_id, public=True, kind='live'))
+                        self.assertTrue(cert.self_signed)
 
-        # Step 4 - Request new certificates
-        for cert_id in acme_chief.cert_status:
-            for key_type_id in KEY_TYPES:
-                status = acme_chief._new_certificate(cert_id, key_type_id)
-                self.assertEqual(status, CertificateStatus.VALID)
-                cert = Certificate.load(acme_chief._get_path(cert_id, key_type_id, public=True, kind='live'))
-                self.assertFalse(cert.self_signed)
+            # Step 4 - Request new certificates
+            for cert_id in acme_chief.cert_status:
+                for key_type_id in KEY_TYPES:
+                    status = acme_chief._new_certificate(cert_id, key_type_id)
+                    with self.subTest(challenge=challenge, step=4):
+                        self.assertIn(status, (CertificateStatus.READY_TO_BE_PUSHED, CertificateStatus.VALID))
+
+            for cert_id in acme_chief.cert_status:
+                for key_type_id in KEY_TYPES:
+                    cert = Certificate.load(acme_chief._get_path(cert_id, key_type_id, public=True, kind='live'))
+                    with self.subTest(challenge=challenge, step=4):
+                        self.assertFalse(cert.self_signed)
 
     @mock.patch('acme_chief.acme_requests.TLS_VERIFY', False)
     @mock.patch('signal.signal')
@@ -1232,6 +1208,9 @@ class ACMEChiefIntegrationTest(BasePebbleIntegrationTest):
                     'validation_dns_servers': ['127.0.0.1'],
                     'sync_dns_servers': ['127.0.0.1'],
                 }
+            },
+            api={
+                'clients_root_directory': '/etc/acmecerts',
             }
         )
         acme_chief.cert_status = {'test_certificate': {
@@ -1267,7 +1246,10 @@ class ACMEChiefIntegrationTest(BasePebbleIntegrationTest):
         for cert_id in acme_chief.cert_status:
             for key_type_id in KEY_TYPES:
                 status = acme_chief._handle_pushed_csr(cert_id, key_type_id)
-                self.assertEqual(status, CertificateStatus.VALID)
+                self.assertIn(status, (CertificateStatus.READY_TO_BE_PUSHED, CertificateStatus.VALID))
+
+        for cert_id in acme_chief.cert_status:
+            for key_type_id in KEY_TYPES:
                 cert = Certificate.load(acme_chief._get_path(cert_id, key_type_id, public=True, kind='live'))
                 self.assertFalse(cert.self_signed)
 
@@ -1302,6 +1284,9 @@ class ACMEChiefIntegrationTest(BasePebbleIntegrationTest):
                     'validation_dns_servers': ['127.0.0.1'],
                     'sync_dns_servers': ['127.0.0.1'],
                 }
+            },
+            api={
+                'clients_root_directory': '/etc/acmecerts',
             }
         )
         acme_chief.cert_status = {'test_certificate': {
@@ -1372,6 +1357,9 @@ class ACMEChiefIntegrationTest(BasePebbleIntegrationTest):
                     'validation_dns_servers': ['127.0.0.1'],
                     'sync_dns_servers': ['127.0.0.1'],
                 }
+            },
+            api={
+                'clients_root_directory': '/etc/acmecerts',
             }
         )
         acme_chief.cert_status = {'test_certificate': {
@@ -1382,9 +1370,10 @@ class ACMEChiefIntegrationTest(BasePebbleIntegrationTest):
         # Step 3 - Generate self signed certificates
         acme_chief.create_initial_certs()
 
-        # Step 4 - run one iteration of certificate management
-        with self.assertRaises(InfiniteLoopBreaker):
-            acme_chief.certificate_management()
+        # Step 4 - run two iterations of certificate management
+        for _ in range(2):
+            with self.assertRaises(InfiniteLoopBreaker):
+                acme_chief.certificate_management()
         for cert_id in acme_chief.cert_status:
             for key_type_id in KEY_TYPES:
                 self.assertEqual(acme_chief.cert_status[cert_id][key_type_id].status, CertificateStatus.VALID)
@@ -1402,9 +1391,10 @@ class ACMEChiefIntegrationTest(BasePebbleIntegrationTest):
                 self.assertEqual(acme_chief.cert_status[cert_id][key_type_id].status,
                                  CertificateStatus.SUBJECTS_CHANGED)
 
-        # Step 7 - Run another iteration of certificate management
-        with self.assertRaises(InfiniteLoopBreaker):
-            acme_chief.certificate_management()
+        # Step 7 - Run another two iterations of certificate management
+        for _ in range(2):
+            with self.assertRaises(InfiniteLoopBreaker):
+                acme_chief.certificate_management()
 
         for cert_id in acme_chief.cert_status:
             for key_type_id in KEY_TYPES:

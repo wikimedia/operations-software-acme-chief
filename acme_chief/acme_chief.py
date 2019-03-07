@@ -27,8 +27,10 @@ import logging
 import logging.config
 import re
 import os
+import pathlib
 import signal
 import subprocess
+import uuid
 from enum import Enum
 from time import sleep
 
@@ -95,15 +97,15 @@ LOGGING_CONFIG = {
 CERTIFICATE_TYPES = {
     'cert_only': {
         'save_mode': CertificateSaveMode.CERT_ONLY,
-        'file_name': '{cert_id}.{key_type_id}.crt',
+        'file_name': '{key_type_id}.crt',
     },
     'chain_only': {
         'save_mode': CertificateSaveMode.CHAIN_ONLY,
-        'file_name': '{cert_id}.{key_type_id}.chain.crt',
+        'file_name': '{key_type_id}.chain.crt',
     },
     'full_chain': {
         'save_mode': CertificateSaveMode.FULL_CHAIN,
-        'file_name': '{cert_id}.{key_type_id}.chained.crt',
+        'file_name': '{key_type_id}.chained.crt',
     }
 }
 
@@ -112,10 +114,13 @@ CHALLENGE_TYPES = {
     'http-01': ACMEChallengeType.HTTP01,
 }
 
+# default values that can be customized via the config file. Check the README for a valid example
 DEFAULT_DNS_ZONE_UPDATE_CMD = '/bin/echo'
 DEFAULT_DNS_ZONE_UPDATE_CMD_TIMEOUT = 60.0
 
 DEFAULT_CERTIFICATE_STAGING_TIME = 3600
+
+DEFAULT_API_CLIENTS_ROOT_DIRECTORY = '/etc/acmecerts'
 
 
 class CertificateStatus(Enum):
@@ -207,13 +212,16 @@ class CertificateState:
 
 class ACMEChiefConfig:
     """Class representing ACMEChief configuration"""
-    def __init__(self, *, accounts, certificates, default_account, authorized_hosts, authorized_regexes, challenges):
+    def __init__(self, *, accounts, certificates, default_account,
+                 authorized_hosts, authorized_regexes, challenges, api):
         self.accounts = accounts
         self.certificates = certificates
         self.default_account = default_account
         self.authorized_hosts = authorized_hosts
         self.authorized_regexes = authorized_regexes
         self.challenges = {}
+        self.api = api
+
         for challenge_type, challenge_config in challenges.items():
             if challenge_type == 'dns-01':
                 if not ('zone_update_cmd' in challenge_config and os.access(challenge_config['zone_update_cmd'],
@@ -284,12 +292,15 @@ class ACMEChiefConfig:
                         logger.warning("Ignoring invalid authorized regex %s for certificate %s", regex, cert_name)
                         continue
 
+        api = config.get('api', {'clients_root_directory': DEFAULT_API_CLIENTS_ROOT_DIRECTORY})
+
         return ACMEChiefConfig(accounts=config['accounts'],
                                certificates=config['certificates'],
                                default_account=default_account,
                                authorized_hosts=dict(authorized_hosts),
                                authorized_regexes=dict(authorized_regexes),
-                               challenges=config['challenges'])
+                               challenges=config['challenges'],
+                               api=api)
 
     @staticmethod
     def _get_default_account(accounts):
@@ -320,8 +331,9 @@ class ACMEChief():
     This class just acts as a container for all the methods and state - config and authorized hosts
     data.
     """
-    live_certs_path = 'live_certs'
-    new_certs_path = 'new_certs'
+    certs_path = 'certs'
+    live_symlink_name = 'live'
+    new_symlink_name = 'new'
     accounts_path = 'accounts'
     csrs_path = 'csrs'
     config_path = 'config.yaml'
@@ -331,8 +343,7 @@ class ACMEChief():
 
     def __init__(self, config_path=PATHS['config'], certificates_path=PATHS['certificates']):
         self._configure_logging()
-        self.live_certs_path = os.path.join(certificates_path, ACMEChief.live_certs_path)
-        self.new_certs_path = os.path.join(certificates_path, ACMEChief.new_certs_path)
+        self.certs_path = os.path.join(certificates_path, ACMEChief.certs_path)
         self.csrs_path = os.path.join(certificates_path, ACMEChief.csrs_path)
         self.accounts_path = os.path.join(config_path, ACMEChief.accounts_path)
         self.config_path = os.path.join(config_path, ACMEChief.config_path)
@@ -352,18 +363,43 @@ class ACMEChief():
         """Configure logging"""
         logging.config.dictConfig(LOGGING_CONFIG)
 
+    def _create_new_certificate_version(self, cert_id, key_type_id=None):
+        if key_type_id is not None:
+            # Attempt to load the private key and cert file for key_type_id. Generate a new version if everything
+            # goes as expected
+            try:
+                PrivateKeyLoader.load(self._get_path(cert_id, key_type_id, public=False, kind='new'))
+                Certificate.load(self._get_path(cert_id, key_type_id,
+                                                public=True, kind='new', cert_type='full_chain'))
+                logger.debug("%s / %s loaded successfully, we need another version")
+            except (OSError, X509Error):
+                if pathlib.Path(self._get_symlink_path(cert_id, 'new')).exists():
+                    logger.debug("Skipping version creation for %s / %s", cert_id, key_type_id)
+                    return
+
+        cert_version = uuid.uuid4().hex
+        logger.info("Creating new certificate version %s for %s", cert_version, cert_id)
+        path = os.path.join(self.certs_path, cert_id, cert_version)
+        os.makedirs(path, mode=0o750)
+
+        symlink_path = self._get_symlink_path(cert_id, kind=ACMEChief.new_symlink_name)
+        try:
+            os.unlink(symlink_path)
+        except FileNotFoundError:
+            # During the initial certificate generation this is expected
+            pass
+        os.symlink(os.path.basename(path), symlink_path, target_is_directory=True)
+
+    def _get_symlink_path(self, cert_id, kind='live'):
+        return os.path.join(self.certs_path, cert_id, kind)
+
     def _get_path(self, cert_id, key_type_id, public=True, kind='live', cert_type='cert_only'):
         if public:
-            file_name = CERTIFICATE_TYPES[cert_type]['file_name'].format(cert_id=cert_id, key_type_id=key_type_id)
+            file_name = CERTIFICATE_TYPES[cert_type]['file_name'].format(key_type_id=key_type_id)
         else:
-            file_name = '{}.{}.key'.format(cert_id, key_type_id)
+            file_name = '{}.key'.format(key_type_id)
 
-        if kind == 'live':
-            base = self.live_certs_path
-        else:
-            base = self.new_certs_path
-
-        return os.path.join(base, file_name)
+        return os.path.join(self.certs_path, cert_id, kind, file_name)
 
     def _set_cert_status(self):
         """
@@ -478,11 +514,12 @@ class ACMEChief():
             for key_type_id, key_type_details in KEY_TYPES.items():
                 if self.cert_status[cert_id][key_type_id].status != CertificateStatus.INITIAL:
                     continue
+                self._create_new_certificate_version(cert_id, key_type_id=key_type_id)
 
                 logger.info("Creating initial self-signed certificate for %s / %s", cert_id, key_type_id)
                 key = key_type_details['class']()
                 key.generate(**key_type_details['params'])
-                key.save(self._get_path(cert_id, key_type_id, public=False, kind='live'))
+                key.save(self._get_path(cert_id, key_type_id, public=False, kind='new'))
 
                 cert = Certificate(SelfSignedCertificate(
                     private_key=key,
@@ -491,10 +528,10 @@ class ACMEChief():
                     from_date=datetime.datetime.utcnow(),
                     until_date=datetime.datetime.utcnow() + datetime.timedelta(days=3),
                 ).pem)
-                for cert_type, cert_type_details in CERTIFICATE_TYPES.items():
-                    path = self._get_path(cert_id, key_type_id, public=True, kind='live', cert_type=cert_type)
-                    cert.save(path, mode=cert_type_details['save_mode'])
+                path = self._get_path(cert_id, key_type_id, public=True, kind='new', cert_type='full_chain')
+                cert.save(path, mode=CertificateSaveMode.FULL_CHAIN)
                 self.cert_status[cert_id][key_type_id].status = CertificateStatus.SELF_SIGNED
+            self._push_live_certificate(cert_id)
 
     def _get_acme_session(self, cert_details):
         acme_account_id = cert_details.get('account', self.config.default_account)
@@ -541,6 +578,7 @@ class ACMEChief():
             - Passes the ball to the next status handler
         """
         logger.info("Handling new certificate event for %s / %s", cert_id, key_type_id)
+        self._create_new_certificate_version(cert_id, key_type_id=key_type_id)
         cert_details = self.config.certificates[cert_id]
         key_type_details = KEY_TYPES[key_type_id]
         private_key = key_type_details['class']()
@@ -786,22 +824,47 @@ class ACMEChief():
                              cert_id, key_type_id)
             return CertificateStatus.CERTIFICATE_ISSUED
 
-        return self._push_live_certificate(cert_id, key_type_id)
+        return self._push_live_certificate(cert_id)
 
-    def _push_live_certificate(self, cert_id, key_type_id):
-        """Moves a new certificate to the live path after checking that everything looks sane"""
-        logger.info("Pushing the new certificate for %s / %s", cert_id, key_type_id)
+    def _push_live_certificate(self, cert_id):
+        """Updates the live symlink after checking that every key_type_id is ready and every certificate type
+            has been generated."""
+        new_symlink = pathlib.Path(self._get_symlink_path(cert_id, ACMEChief.new_symlink_name))
+        live_symlink = pathlib.Path(self._get_symlink_path(cert_id, ACMEChief.live_symlink_name))
+        if new_symlink.exists() and live_symlink.exists() and new_symlink.resolve() == live_symlink.resolve():
+            return CertificateStatus.VALID
+
+        logger.info("Pushing the new certificate for %s", cert_id)
+        for key_type_id in KEY_TYPES:
+            try:
+                _ = PrivateKeyLoader.load(self._get_path(cert_id, key_type_id, public=False, kind='new'))
+                cert = Certificate.load(self._get_path(cert_id, key_type_id,
+                                                       public=True, kind='new', cert_type='full_chain'))
+                for cert_type, cert_type_details in CERTIFICATE_TYPES.items():
+                    cert.save(self._get_path(cert_id, key_type_id, public=True, kind='new', cert_type=cert_type),
+                              mode=cert_type_details['save_mode'])
+            except FileNotFoundError:
+                logger.info("Waiting till %s / %s is generated to be able to push the new certificate",
+                            cert_id, key_type_id)
+                return CertificateStatus.READY_TO_BE_PUSHED
+            except (OSError, X509Error):
+                logger.exception("Problem pushing live certificate %s / %s",
+                                 cert_id, key_type_id)
+                return CertificateStatus.CERTIFICATE_ISSUED
+
         try:
-            private_key = PrivateKeyLoader.load(self._get_path(cert_id, key_type_id, public=False, kind='new'))
-            cert = Certificate.load(self._get_path(cert_id, key_type_id,
-                                                   public=True, kind='new', cert_type='full_chain'))
-            private_key.save(self._get_path(cert_id, key_type_id, public=False, kind='live'))
-            for cert_type, cert_type_details in CERTIFICATE_TYPES.items():
-                cert.save(self._get_path(cert_id, key_type_id, public=True, kind='live', cert_type=cert_type),
-                          mode=cert_type_details['save_mode'])
-        except (OSError, X509Error):
-            logger.exception("Problem pushing live certificate %s / %s",
-                             cert_id, key_type_id)
+            os.unlink(live_symlink)
+        except FileNotFoundError:
+            pass
+        except OSError:
+            logger.exception("Problem pushing live certificate %s", cert_id)
+            return CertificateStatus.CERTIFICATE_ISSUED
+
+        try:
+            symlink_source = new_symlink.resolve()
+            os.symlink(symlink_source, live_symlink, target_is_directory=True)
+        except OSError:
+            logger.exception("Problem pushing live certificate %s", cert_id)
             return CertificateStatus.CERTIFICATE_ISSUED
 
         return CertificateStatus.VALID
@@ -838,7 +901,7 @@ class ACMEChief():
                     elif cert_state.status is CertificateStatus.ORDER_FINALIZED:
                         new_status = self._handle_order_finalized(cert_id, key_type_id)
                     elif cert_state.status is CertificateStatus.READY_TO_BE_PUSHED:
-                        new_status = self._push_live_certificate(cert_id, key_type_id)
+                        new_status = self._push_live_certificate(cert_id)
                     else:
                         logger.error("Unexpected state: %s", cert_state.status)
                         continue

@@ -54,6 +54,8 @@ challenges:
         - 127.0.0.1
         zone_update_cmd: /bin/echo
         zone_update_cmd_timeout: 60.0
+api:
+    clients_root_directory: /etc/acmecerts
 ```
 
 It also supports per-certificate configuration in /etc/acme-chief/conf.d. conf.d file example:

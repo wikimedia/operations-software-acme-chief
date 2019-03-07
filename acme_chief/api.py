@@ -50,8 +50,6 @@ def create_app(config_dir=PATHS['config'], certificates_dir=PATHS['certificates'
     """Creates the flask app with the embedded ACMEChiefConfig"""
     app = flask.Flask(__name__)
 
-    live_certs_path = os.path.join(certificates_dir, ACMEChief.live_certs_path)
-
     config_path = None
     confd_path = None
     state = {'config': acme_chief_config}
@@ -119,8 +117,7 @@ def create_app(config_dir=PATHS['config'], certificates_dir=PATHS['certificates'
         if not state['config'].check_access(client_dn, certname):
             abort(403, 'access denied')
 
-        fname = '{}.{}'.format(certname, part)
-        fpath = os.path.join(live_certs_path, fname)
+        fpath = os.path.join(certificates_dir, ACMEChief.certs_path, certname, ACMEChief.live_symlink_name, part)
 
         try:
             with open(fpath, 'rb') as requested_f:

@@ -53,6 +53,9 @@ class ACMEChiefApiTest(unittest.TestCase):
                     'validation_dns_servers': ['127.0.0.1'],
                     'sync_dns_servers': ['127.0.0.1'],
                 }
+            },
+            api={
+                'clients_root_directory': '/etc/acmecerts',
             }
         )
         self._populate_files()
@@ -71,12 +74,14 @@ class ACMEChiefApiTest(unittest.TestCase):
                 yield file_name.format(key_type)
 
     def _populate_files(self):
-        live_certs_path = os.path.join(self.certificates_path.name, ACMEChief.live_certs_path)
-        os.mkdir(live_certs_path, mode=0o700)
+        certs_path = os.path.join(self.certificates_path.name, ACMEChief.certs_path)
+        os.mkdir(certs_path, mode=0o700)
 
         for certname in self.config.certificates:
+            live_cert_path = os.path.join(certs_path, certname, ACMEChief.live_symlink_name)
+            os.makedirs(live_cert_path, mode=0o700)
             for part in self._get_valid_parts():
-                path = os.path.join(live_certs_path, '{}.{}'.format(certname, part))
+                path = os.path.join(live_cert_path, part)
                 with open(path, 'wb', opener=secure_opener) as cert_file:
                     cert_file.write(FILE_CONTENT)
 

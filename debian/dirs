@@ -2,8 +2,7 @@ etc/acme-chief
 etc/acme-chief/conf.d
 etc/acme-chief/accounts
 var/lib/acme-chief
-var/lib/acme-chief/new_certs
-var/lib/acme-chief/live_certs
+var/lib/acme-chief/certs
 var/lib/acme-chief/http_challenges
 var/lib/acme-chief/dns_challenges
 var/lib/acme-chief/csrs

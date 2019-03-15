@@ -11,17 +11,17 @@ case "$1" in
     fi
 
     chmod 750 /etc/acme-chief /var/lib/acme-chief \
-              /var/lib/acme-chief/live_certs \
+              /var/lib/acme-chief/certs \
               /var/lib/acme-chief/http_challenges \
               /var/lib/acme-chief/dns_challenges
-    chmod 700 /var/lib/acme-chief/new_certs /var/lib/acme-chief/csrs
+    chmod 700 /var/lib/acme-chief/csrs
 
     if ! getent group acme-chief > /dev/null; then
         echo "Error: acme-chief group does not exist" >&2
         exit 1
     fi
     chown acme-chief:acme-chief /etc/acme-chief /etc/acme-chief/accounts /var/lib/acme-chief \
-                                  /var/lib/acme-chief/new_certs /var/lib/acme-chief/live_certs \
+                                  /var/lib/acme-chief/certs \
                                   /var/lib/acme-chief/http_challenges /var/lib/acme-chief/dns_challenges \
                                   /var/lib/acme-chief/csrs
 

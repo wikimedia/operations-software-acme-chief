@@ -1,3 +1,9 @@
+acme-chief (0.11-1) buster-wikimedia; urgency=medium
+
+  Store certificates in unique directories
+
+ -- Valentin Gutierrez <vgutierrez@wikimedia.org>  Fri, 15 Mar 2019 12:37:39 +0100
+
 acme-chief (0.10-1) buster-wikimedia; urgency=medium
 
   acme-chief: Bump to buster

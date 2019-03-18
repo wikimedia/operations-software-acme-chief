@@ -142,6 +142,8 @@ class ACMEChiefConfigTest(unittest.TestCase):
                          timedelta(seconds=3600))
         self.assertEqual(config.certificates['non_default_account_certificate']['staging_time'],
                          timedelta(seconds=7200))
+        self.assertIn(config.certificates['non_default_account_certificate']['CN'],
+                      config.certificates['non_default_account_certificate']['SNI'])
         self.assertEqual(config.challenges[ACMEChallengeType.DNS01]['zone_update_cmd'], '/usr/bin/dns-update-zone')
         self.assertEqual(config.challenges[ACMEChallengeType.DNS01]['zone_update_cmd_timeout'], 30.5)
         access_mock.assert_called_once_with('/usr/bin/dns-update-zone', os.X_OK)

@@ -282,6 +282,10 @@ class ACMEChiefConfig:
                                staging_time_seconds, cert_name, DEFAULT_CERTIFICATE_STAGING_TIME)
                 cert_config['staging_time'] = datetime.timedelta(seconds=DEFAULT_CERTIFICATE_STAGING_TIME)
 
+            if cert_config['CN'] not in cert_config['SNI']:
+                cert_config['SNI'].append(cert_config['CN'])
+                logger.warning("Appending CN to SNI list for certificate %s", cert_name)
+
             if 'authorized_hosts' in cert_config:
                 authorized_hosts[cert_name].update(cert_config['authorized_hosts'])
             if 'authorized_regexes' in cert_config:

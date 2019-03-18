@@ -531,7 +531,7 @@ class ACMEChief():
                 path = self._get_path(cert_id, key_type_id, public=True, kind='new', cert_type='full_chain')
                 cert.save(path, mode=CertificateSaveMode.FULL_CHAIN)
                 self.cert_status[cert_id][key_type_id].status = CertificateStatus.SELF_SIGNED
-            self._push_live_certificate(cert_id)
+                self._push_live_certificate(cert_id)
 
     def _get_acme_session(self, cert_details):
         acme_account_id = cert_details.get('account', self.config.default_account)

@@ -866,7 +866,7 @@ class ACMEChief():
 
         try:
             symlink_source = new_symlink.resolve()
-            os.symlink(symlink_source, live_symlink, target_is_directory=True)
+            os.symlink(os.path.basename(symlink_source), live_symlink, target_is_directory=True)
         except OSError:
             logger.exception("Problem pushing live certificate %s", cert_id)
             return CertificateStatus.CERTIFICATE_ISSUED

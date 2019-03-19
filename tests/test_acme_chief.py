@@ -1178,6 +1178,15 @@ class ACMEChiefIntegrationTest(BasePebbleIntegrationTest):
                     with self.subTest(challenge=challenge, step=4):
                         self.assertFalse(cert.self_signed)
 
+            for cert_id in acme_chief.cert_status:
+                for key_type_id in KEY_TYPES:
+                    for symlink_type in ('live', 'new'):
+                        with self.subTest(challenge=challenge, step=4, symlink_type=symlink_type):
+                            cert_path = acme_chief._get_path(cert_id, key_type_id, public=True, kind=symlink_type)
+                            link_target = os.readlink(os.path.dirname(cert_path))
+                            self.assertNotEqual(link_target, os.path.abspath(link_target),
+                                                "We got an absolute symlink instead of the expected relative one")
+
     @mock.patch('acme_chief.acme_requests.TLS_VERIFY', False)
     @mock.patch('signal.signal')
     @mock.patch.object(ACMEChief, 'sighup_handler')

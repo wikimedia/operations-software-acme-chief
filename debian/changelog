@@ -1,3 +1,11 @@
+acme-chief (0.13-1) buster-wikimedia; urgency=medium
+
+  Ensure that the CN is part of the SNI list for certs config
+  api: Add support for puppet HTTP API search operation
+  Use relative symlinks for the live one
+
+ -- Alex Monk <krenair@gmail.com>  Tue, 19 Mar 2019 15:56:29 +0000
+
 acme-chief (0.12-1) buster-wikimedia; urgency=medium
 
   Avoid unneeded calls to _push_live_certificate()

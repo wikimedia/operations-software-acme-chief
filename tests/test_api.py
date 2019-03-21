@@ -189,9 +189,6 @@ class ACMEChiefApiTest(unittest.TestCase):
                     self.assertEqual(result.status_code, 200)
                     self.assertEqual(result.data, FILE_CONTENT)
 
-    # FIXME: we should be returning PSON data according to
-    # https://puppet.com/docs/puppet/4.8/http_api/http_file_metadata.html#supported-response-formats
-    @unittest.expectedFailure
     def test_get_metadata(self):
         args = {
             'certname': list(self.config.certificates.keys())[0],
@@ -202,20 +199,31 @@ class ACMEChiefApiTest(unittest.TestCase):
             args['part'] = part
             url = VALID_ROUTES[-1].format(**args)
             result = self.app.get(url, headers=VALID_HEADERS, query_string=METADATA_QUERY_PARAMS)
-            self.assertEqual(result.status_code, 200)
-            metadata = yaml.safe_load(result.data)
-            self.assertEqual(metadata['checksum']['type'], METADATA_QUERY_PARAMS['checksum_type'])
-            self.assertEqual(metadata['links'], METADATA_QUERY_PARAMS['links'])
-            self.assertEqual(metadata['checksum']['value'], '{md5}' + FILE_MD5)
-            self.assertEqual(metadata['mode'], 0o600)
-            self.assertEqual(metadata['type'], 'file')
-            path = os.path.join(self.certificates_path.name,
-                                ACMEChief.live_certs_path,
-                                '{}.{}'.format(args['certname'], args['part']))
-            self.assertEqual(metadata['path'], path)
+            with self.subTest(part=part, url=url):
+                self.assertEqual(result.status_code, 200)
+                metadata = yaml.safe_load(result.data)
+                self.assertEqual(metadata['checksum']['type'], METADATA_QUERY_PARAMS['checksum_type'])
+                self.assertEqual(metadata['links'], METADATA_QUERY_PARAMS['links'])
+                self.assertEqual(metadata['checksum']['value'], '{md5}' + FILE_MD5)
+                self.assertEqual(metadata['mode'], 0o640)
+                self.assertEqual(metadata['type'], 'file')
 
-        # when fixed, move this assert into the previous loop
-        self.assertEqual(result.content_type, 'text/pson')
+    # FIXME: we should be returning PSON data according to
+    # https://puppet.com/docs/puppet/4.8/http_api/http_file_metadata.html#supported-response-formats
+    @unittest.expectedFailure
+    def test_get_metadata_content_type(self):
+        args = {
+            'certname': list(self.config.certificates.keys())[0],
+            'api': 'metadata',
+        }
+        for part in self._get_valid_parts():
+            args['part'] = part
+            url = VALID_ROUTES[-1].format(**args)
+            result = self.app.get(url, headers=VALID_HEADERS, query_string=METADATA_QUERY_PARAMS)
+            with self.subTest(part=part):
+                self.assertEqual(result.status_code, 200)
+                self.assertEqual(result.content_type, 'text/pson')
+
 
     def test_get_directory_metadatas(self):
         expected_metadata = {

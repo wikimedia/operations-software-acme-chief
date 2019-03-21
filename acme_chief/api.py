@@ -199,7 +199,9 @@ def create_app(config_dir=PATHS['config'], certificates_dir=PATHS['certificates'
 
         if api != 'metadatas':
             file_contents = None
-            if part is not None:
+            if part is None:
+                fpath = certname_path
+            else:
                 fpath = os.path.join(certname_path, certversion, part)
 
                 try:
@@ -212,7 +214,6 @@ def create_app(config_dir=PATHS['config'], certificates_dir=PATHS['certificates'
                 if api != 'metadata':
                     return flask.Response(file_contents, mimetype='application/octet-stream')
 
-            fpath = certname_path
             return flask.Response(yaml.dump(get_file_metadata(fpath, file_contents,
                                                               state['config'].api['clients_root_directory'])),
                                   mimetype='text/yaml')

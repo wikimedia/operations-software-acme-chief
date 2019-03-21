@@ -1,3 +1,9 @@
+acme-chief (0.15-1) buster-wikimedia; urgency=medium
+
+  api: Fix file_metadata for /puppet/v3/file_metadata/acmedata/{certname}/{part}
+
+ -- Valentin Gutierrez <vgutierrez@wikimedia.org>  Thu, 21 Mar 2019 12:41:27 +0100
+
 acme-chief (0.14-1) buster-wikimedia; urgency=medium
 
   Get rid of the no-break space that got in the Requirements section title

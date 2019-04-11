@@ -2,7 +2,7 @@ acme-chief (0.16-1) buster-wikimedia; urgency=medium
 
   acme_requests: Validate dns-01 challenges against all the DNS servers
 
- -- Valentin Gutierrez <vgutierrez@wikimedia.org>  Apr, 11 Mar 2019 16:33:22 +0200
+ -- Valentin Gutierrez <vgutierrez@wikimedia.org>  Thu, 11 Apr 2019 16:33:22 +0200
 
 acme-chief (0.15-1) buster-wikimedia; urgency=medium
 

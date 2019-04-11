@@ -8,20 +8,18 @@ import abc
 import hashlib
 import logging
 import os
-import socket
 import time
 from collections import defaultdict
 from datetime import datetime, timedelta
 from enum import Enum
 from urllib.parse import urlunparse
 
-import dns.exception
-import dns.resolver
 import josepy as jose
 import OpenSSL
 import requests
 from acme import client, errors, messages
 
+from acme_chief.dns import DNSFailedQueryError, DNSNoAnswerError, Resolver
 # TODO: move secure_opener out of x509
 from acme_chief.x509 import (Certificate, CertificateRevokeReason,
                              CertificateSigningRequest, PrivateKeyLoader,
@@ -30,7 +28,6 @@ from acme_chief.x509 import (Certificate, CertificateRevokeReason,
 BASEPATH = '/etc/acme-chief/accounts'
 DIRECTORY_URL = 'https://acme-v02.api.letsencrypt.org/directory'
 TLS_VERIFY = True   # intended to be used during testing
-DNS_PORT = 53       # intended to be used during testing
 DNS_SERVERS = None  # intended to be used during testing
 HTTP_VALIDATOR_PROXIES = {
     'http': os.getenv('HTTP_PROXY'),
@@ -127,33 +124,6 @@ class DNS01ACMEChallenge(BaseACMEChallenge):
         self.validation_domain_name = validation_domain_name
         self.file_name = "{}-{}".format(validation_domain_name, validation)
 
-    @staticmethod
-    def _resolve_dns_servers(dns_servers):
-        """Use system resolver to attempt to resolve DNS servers specified as hostnames"""
-        ret = []
-        for dns_server in dns_servers:
-            addresses_info = socket.getaddrinfo(dns_server, 53, proto=socket.IPPROTO_UDP)
-            for _, _, _, _, sockaddr in addresses_info:
-                ret.append(sockaddr[0])
-
-        return ret
-
-    @staticmethod
-    def _perform_txt_query(dns_server, name, timeout):
-        """Perform a TXT query against the specified DNS server.
-           Generates the TXT records associated to that name"""
-        resolver = dns.resolver.Resolver()
-        resolver.port = DNS_PORT
-        if dns_server is not None:
-            resolver.nameservers = [dns_server]
-        resolver.timeout = timeout
-        resolver.lifetime = timeout
-
-        answer = resolver.query(name, rdtype='TXT')
-
-        for rrset in answer.rrset:
-            yield rrset.to_text().strip('"')
-
     def validate(self, **kwargs):
         logger.debug("Attempting to validate challenge %s", self)
         dns_servers = kwargs.get('dns_servers', DNS_SERVERS)
@@ -161,7 +131,7 @@ class DNS01ACMEChallenge(BaseACMEChallenge):
         ips_nameservers = [None]
         if dns_servers is not None:
             try:
-                ips_nameservers = set(self._resolve_dns_servers(dns_servers))
+                ips_nameservers = set(Resolver.resolve_dns_servers(dns_servers))
             except OSError:
                 logger.exception("Unable to resolve configured dns servers %s. Using system DNS servers as fallback",
                                  dns_servers)
@@ -170,14 +140,14 @@ class DNS01ACMEChallenge(BaseACMEChallenge):
 
         for ip_nameserver in ips_nameservers:
             try:
-                txt_records = self._perform_txt_query(ip_nameserver, self.validation_domain_name, timeout)
+                resolver = Resolver(nameservers=(ip_nameserver,), timeout=timeout)
+                txt_records = resolver.txt_query(self.validation_domain_name)
                 for txt_record in txt_records:
                     if txt_record == self.validation:
                         validation_result[ip_nameserver] = ACMEChallengeValidation.VALID
-
-            except (dns.resolver.NXDOMAIN, dns.resolver.YXDOMAIN, dns.resolver.NoAnswer):
+            except DNSNoAnswerError:
                 validation_result[ip_nameserver] = ACMEChallengeValidation.INVALID
-            except (dns.exception.Timeout, dns.resolver.NoNameservers):
+            except DNSFailedQueryError:
                 validation_result[ip_nameserver] = ACMEChallengeValidation.UNKNOWN
 
         if len(validation_result.keys()) != len(ips_nameservers):

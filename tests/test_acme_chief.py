@@ -958,7 +958,7 @@ class ACMEChiefIntegrationTest(BasePebbleIntegrationTest):
         self.patchers = [
             mock.patch.dict('acme_chief.acme_requests.HTTP_VALIDATOR_PROXIES', {'http': proxy_url}),
             mock.patch('acme_chief.acme_requests.DNS_SERVERS', [dns_host]),
-            mock.patch('acme_chief.acme_requests.DNS_PORT', dns_port),
+            mock.patch('acme_chief.dns.DNS_PORT', dns_port),
         ]
         for patcher in self.patchers:
             patcher.start()

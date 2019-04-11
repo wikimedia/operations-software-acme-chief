@@ -10,7 +10,6 @@ from cryptography import x509 as crypto_x509
 from cryptography.x509.oid import ExtensionOID, NameOID
 
 from acme_chief.acme_requests import (DEFAULT_DNS01_VALIDATION_TIMEOUT,
-                                      DNS_PORT,
                                       ACMEAccount, ACMEAccountFiles,
                                       ACMEChallengeNotValidatedError,
                                       ACMEChallengeType,
@@ -88,26 +87,8 @@ class ACMEChallengeTest(unittest.TestCase):
                 result = challenge.validate()
                 self.assertEqual(result, test_case['expected_result'], test_case['name'])
 
-    @mock.patch('dns.resolver.Resolver')
-    def test_perform_txt_query(self, resolver_mock):
-        rrset_mock = mock.MagicMock()
-        rrset_mock.to_text.return_value = 'foo'
-        answer_mock = mock.MagicMock()
-        answer_mock.rrset = [rrset_mock]
-        resolver_mock.return_value.query.return_value = answer_mock
-        txt_records = DNS01ACMEChallenge._perform_txt_query('127.0.0.1', '_acme-challenge.tests.wmflab.org',
-                                                            DEFAULT_DNS01_VALIDATION_TIMEOUT)
-        self.assertIn('foo', txt_records)
-        resolver_instance = resolver_mock.return_value
-        self.assertEqual(resolver_instance.port, DNS_PORT)
-        self.assertEqual(resolver_instance.timeout, DEFAULT_DNS01_VALIDATION_TIMEOUT)
-        self.assertEqual(resolver_instance.lifetime, DEFAULT_DNS01_VALIDATION_TIMEOUT)
-        self.assertEqual(resolver_instance.nameservers, ['127.0.0.1'])
-        resolver_instance.query.assert_called_once_with('_acme-challenge.tests.wmflab.org', rdtype='TXT')
-
-    @mock.patch.object(DNS01ACMEChallenge, '_perform_txt_query')
-    @mock.patch.object(DNS01ACMEChallenge, '_resolve_dns_servers')
-    def test_validate_dns(self, resolve_dns_servers_mock, txt_query_mock):
+    @mock.patch('acme_chief.acme_requests.Resolver')
+    def test_validate_dns(self, resolver_mock):
         challenge = DNS01ACMEChallenge(validation_domain_name='_acme-challenge.tests.wmflab.org',
                                        validation="fake_validation")
         dns_servers_cases = (
@@ -119,21 +100,25 @@ class ACMEChallengeTest(unittest.TestCase):
         for dns_servers in dns_servers_cases:
             for validation_result in (ACMEChallengeValidation.VALID, ACMEChallengeValidation.INVALID):
                 with self.subTest(dns_servers=dns_servers, validation_result=validation_result):
-                    txt_query_mock.reset_mock()
+                    resolver_mock.reset_mock()
+                    resolver_instance_mock = resolver_mock.return_value
                     if validation_result is ACMEChallengeValidation.VALID:
-                        txt_query_mock.return_value = [challenge.validation]
+                        resolver_instance_mock.txt_query.return_value = [challenge.validation]
                     else:
-                        txt_query_mock.return_value = ['foo']
+                        resolver_instance_mock.txt_query.return_value = ['foo']
 
-                    resolve_dns_servers_mock.return_value = dns_servers
+                    resolver_mock.resolve_dns_servers.return_value = dns_servers
                     result = challenge.validate(dns_servers=dns_servers)
-                    txt_query_mock_calls = []
+                    self.assertEqual(len(dns_servers), len(resolver_instance_mock.txt_query.mock_calls))
+                    resolver_mock_calls = []
+                    txt_query_calls = []
                     for dns_server in dns_servers:
-                        txt_query_mock_calls.append(mock.call(dns_server,
-                                                              challenge.validation_domain_name,
-                                                              DEFAULT_DNS01_VALIDATION_TIMEOUT))
-                    self.assertEqual(len(dns_servers), len(txt_query_mock.mock_calls))
-                    txt_query_mock.assert_has_calls(txt_query_mock_calls, any_order=True)
+                        resolver_mock_calls.append(mock.call(nameservers=(dns_server,),
+                                                             timeout=DEFAULT_DNS01_VALIDATION_TIMEOUT))
+                        txt_query_calls.append(mock.call(challenge.validation_domain_name))
+                    resolver_mock.assert_has_calls(resolver_mock_calls, any_order=True)
+                    resolver_instance_mock.txt_query.assert_has_calls(txt_query_calls)
+                    resolver_mock.resolve_dns_servers.assert_called_once_with(dns_servers)
                     self.assertEqual(result, validation_result)
 
     @mock.patch.object(dns.resolver.Resolver, 'query')

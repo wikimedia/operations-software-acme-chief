@@ -138,34 +138,59 @@ class DNS01ACMEChallenge(BaseACMEChallenge):
 
         return ret
 
-    def validate(self, **kwargs):
-        logger.debug("Attempting to validate challenge %s", self)
+    @staticmethod
+    def _perform_txt_query(dns_server, name, timeout):
+        """Perform a TXT query against the specified DNS server.
+           Generates the TXT records associated to that name"""
         resolver = dns.resolver.Resolver()
         resolver.port = DNS_PORT
+        if dns_server is not None:
+            resolver.nameservers = [dns_server]
+        resolver.timeout = timeout
+        resolver.lifetime = timeout
+
+        answer = resolver.query(name, rdtype='TXT')
+
+        for rrset in answer.rrset:
+            yield rrset.to_text().strip('"')
+
+    def validate(self, **kwargs):
+        logger.debug("Attempting to validate challenge %s", self)
         dns_servers = kwargs.get('dns_servers', DNS_SERVERS)
+        timeout = kwargs.get('timeout', DEFAULT_DNS01_VALIDATION_TIMEOUT)
+        ips_nameservers = [None]
         if dns_servers is not None:
             try:
-                resolver.nameservers = self._resolve_dns_servers(dns_servers)
+                ips_nameservers = set(self._resolve_dns_servers(dns_servers))
             except OSError:
                 logger.exception("Unable to resolve configured dns servers %s. Using system DNS servers as fallback",
                                  dns_servers)
 
-        resolver.timeout = kwargs.get('timeout', DEFAULT_DNS01_VALIDATION_TIMEOUT)
-        resolver.lifetime = kwargs.get('timeout', DEFAULT_DNS01_VALIDATION_TIMEOUT)
+        validation_result = {}
 
-        try:
-            answer = resolver.query(self.validation_domain_name, rdtype='TXT')
-        except (dns.resolver.NXDOMAIN, dns.resolver.YXDOMAIN, dns.resolver.NoAnswer):
+        for ip_nameserver in ips_nameservers:
+            try:
+                txt_records = self._perform_txt_query(ip_nameserver, self.validation_domain_name, timeout)
+                for txt_record in txt_records:
+                    if txt_record == self.validation:
+                        validation_result[ip_nameserver] = ACMEChallengeValidation.VALID
+
+            except (dns.resolver.NXDOMAIN, dns.resolver.YXDOMAIN, dns.resolver.NoAnswer):
+                validation_result[ip_nameserver] = ACMEChallengeValidation.INVALID
+            except (dns.exception.Timeout, dns.resolver.NoNameservers):
+                validation_result[ip_nameserver] = ACMEChallengeValidation.UNKNOWN
+
+        if len(validation_result.keys()) != len(ips_nameservers):
             return ACMEChallengeValidation.INVALID
-        except (dns.exception.Timeout, dns.resolver.NoNameservers):
-            return ACMEChallengeValidation.UNKNOWN
 
-        for rrset in answer.rrset:
-            txt_data = rrset.to_text().strip('"')
-            if txt_data == self.validation:
-                return ACMEChallengeValidation.VALID
+        ret = ACMEChallengeValidation.VALID
+        for nameserver, result in validation_result.items():
+            if result != ACMEChallengeValidation.VALID:
+                # We could interrupt the loop and return immediately but it's interesting to report DNS inconsistencies
+                logger.error("DNS server %s (%s) failed to validate challenge %s", nameserver, result, self)
+                ret = result
 
-        return ACMEChallengeValidation.INVALID
+        return ret
 
     def __str__(self):
         return '{}. {} TXT {}'.format(super().__str__(), self.validation_domain_name, self.validation)

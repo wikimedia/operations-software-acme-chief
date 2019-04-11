@@ -1205,7 +1205,6 @@ class ACMEChiefIntegrationTest(BasePebbleIntegrationTest):
                 {
                     'CN': 'acmechieftest.beta.wmflabs.org',
                     'SNI': ['acmechieftest.beta.wmflabs.org'],
-                    'challenge': 'http-01',
                     'staging_time': timedelta(seconds=0),
                 },
             },
@@ -1237,32 +1236,35 @@ class ACMEChiefIntegrationTest(BasePebbleIntegrationTest):
                 cert = Certificate.load(acme_chief._get_path(cert_id, key_type_id, public=True, kind='live'))
                 self.assertTrue(cert.self_signed)
 
-        # Step 4 - Request new certificates setting a wrong challenge location
-        # to force a challenge validation issue
-        with tempfile.TemporaryDirectory() as fake_challenge_dir:
-            valid_challenge_path = acme_chief.challenges_path[ACMEChallengeType.HTTP01]
-            acme_chief.challenges_path[ACMEChallengeType.HTTP01] = fake_challenge_dir
-            for cert_id in acme_chief.cert_status:
-                for key_type_id in KEY_TYPES:
-                    status = acme_chief._new_certificate(cert_id, key_type_id)
-                    self.assertEqual(status, CertificateStatus.CSR_PUSHED)
+        for challenge_type in (ACMEChallengeType.HTTP01, ACMEChallengeType.DNS01):
+            with self.subTest(challenge_type=challenge_type.value):
+                acme_chief.config.certificates['test_certificate']['challenge'] = challenge_type.value
+                # Step 4 - Request new certificates setting a wrong challenge location
+                # to force a challenge validation issue
+                with tempfile.TemporaryDirectory() as fake_challenge_dir:
+                    valid_challenge_path = acme_chief.challenges_path[challenge_type]
+                    acme_chief.challenges_path[challenge_type] = fake_challenge_dir
+                    for cert_id in acme_chief.cert_status:
+                        for key_type_id in KEY_TYPES:
+                            status = acme_chief._new_certificate(cert_id, key_type_id)
+                            self.assertEqual(status, CertificateStatus.CSR_PUSHED)
 
-            acme_chief.challenges_path[ACMEChallengeType.HTTP01] = valid_challenge_path
-            # Copy the challenges to the correct challenge path
-            for challenge_file in os.listdir(fake_challenge_dir):
-                challenge_file_path = os.path.join(fake_challenge_dir, challenge_file)
-                shutil.copy2(challenge_file_path, valid_challenge_path)
+                    acme_chief.challenges_path[challenge_type] = valid_challenge_path
+                    # Copy the challenges to the correct challenge path
+                    for challenge_file in os.listdir(fake_challenge_dir):
+                        challenge_file_path = os.path.join(fake_challenge_dir, challenge_file)
+                        shutil.copy2(challenge_file_path, valid_challenge_path)
 
-        # Step 5 - Resume the process
-        for cert_id in acme_chief.cert_status:
-            for key_type_id in KEY_TYPES:
-                status = acme_chief._handle_pushed_csr(cert_id, key_type_id)
-                self.assertIn(status, (CertificateStatus.READY_TO_BE_PUSHED, CertificateStatus.VALID))
+                # Step 5 - Resume the process
+                for cert_id in acme_chief.cert_status:
+                    for key_type_id in KEY_TYPES:
+                        status = acme_chief._handle_pushed_csr(cert_id, key_type_id)
+                        self.assertIn(status, (CertificateStatus.READY_TO_BE_PUSHED, CertificateStatus.VALID))
 
-        for cert_id in acme_chief.cert_status:
-            for key_type_id in KEY_TYPES:
-                cert = Certificate.load(acme_chief._get_path(cert_id, key_type_id, public=True, kind='live'))
-                self.assertFalse(cert.self_signed)
+                for cert_id in acme_chief.cert_status:
+                    for key_type_id in KEY_TYPES:
+                        cert = Certificate.load(acme_chief._get_path(cert_id, key_type_id, public=True, kind='live'))
+                        self.assertFalse(cert.self_signed)
 
     @mock.patch('acme_chief.acme_requests.TLS_VERIFY', False)
     @mock.patch('signal.signal')

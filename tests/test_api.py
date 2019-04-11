@@ -7,8 +7,9 @@ import unittest
 
 import yaml
 
-from acme_chief.acme_chief import KEY_TYPES, ACMEChief, ACMEChiefConfig
+from acme_chief.acme_chief import KEY_TYPES, ACMEChief
 from acme_chief.api import create_app
+from acme_chief.config import ACMEChiefConfig
 from acme_chief.x509 import secure_opener
 
 FILE_CONTENT = b'we do not care about the content'

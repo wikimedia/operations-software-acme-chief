@@ -14,8 +14,8 @@ from datetime import datetime
 import flask
 import yaml
 
-from acme_chief.acme_chief import (PATHS, KEY_TYPES, ACMEChief,
-                                   ACMEChiefConfig)
+from acme_chief.acme_chief import (PATHS, KEY_TYPES, ACMEChief)
+from acme_chief.config import ACMEChiefConfig
 
 REQUIRED_PARAMETERS = {
     'metadata': {

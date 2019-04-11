@@ -8,8 +8,9 @@ from copy import deepcopy
 from datetime import datetime, timedelta
 
 import mock
-from cryptography.hazmat.primitives.asymmetric import ec
-
+from acme_chief.acme_chief import (CERTIFICATE_TYPES, CHALLENGE_TYPES,
+                                   KEY_TYPES, ACMEChief, ACMEChiefConfig,
+                                   CertificateState, CertificateStatus)
 from acme_chief.acme_requests import (ACMEAccount,
                                       ACMEChallengeNotValidatedError,
                                       ACMEChallengeType,
@@ -17,163 +18,20 @@ from acme_chief.acme_requests import (ACMEAccount,
                                       ACMEInvalidChallengeError,
                                       ACMEIssuedCertificateError,
                                       DNS01ACMEChallenge)
-from acme_chief.acme_chief import (CERTIFICATE_TYPES,
-                                   CHALLENGE_TYPES,
-                                   DEFAULT_DNS_ZONE_UPDATE_CMD,
-                                   DEFAULT_DNS_ZONE_UPDATE_CMD_TIMEOUT,
-                                   KEY_TYPES, ACMEChief, ACMEChiefConfig,
-                                   CertificateState, CertificateStatus)
+from acme_chief.config import (DEFAULT_DNS_ZONE_UPDATE_CMD,
+                               DEFAULT_DNS_ZONE_UPDATE_CMD_TIMEOUT)
 from acme_chief.x509 import (Certificate, CertificateSaveMode, ECPrivateKey,
                              PrivateKeyLoader, X509Error)
+from cryptography.hazmat.primitives.asymmetric import ec
 from tests.test_pebble import (BaseDNSRequestHandler,
                                BasePebbleIntegrationTest,
                                HTTP01ChallengeHandler)
 
 DIRECTORY_URL = 'https://127.0.0.1:14000/dir'
 
-VALID_CONFIG_EXAMPLE = '''
-accounts:
-  - id: ee566f9e436e120082f0770c0d58dd6d
-    directory: https://acme-staging-v02.api.letsencrypt.org/directory
-    default: true
-  - id: 621b49f9c6ccbbfbff9acb6e18f71205
-    directory: https://127.0.0.1:14000/dir
-certificates:
-  default_account_certificate:
-    CN: acmechieftest.beta.wmflabs.org
-    SNI:
-        - acmechieftest.beta.wmflabs.org
-    challenge: http-01
-    authorized_hosts:
-        - deployment-acmechief-testclient03.deployment-prep.eqiad.wmflabs
-  non_default_account_certificate:
-    account: 621b49f9c6ccbbfbff9acb6e18f71205
-    CN: 'test.wmflabs.org'
-    SNI:
-        - '*.test.wmflabs.org'
-    challenge: dns-01
-    staging_time: 7200
-  certificate_auth_by_regex:
-    CN: regex.test.wmflabs.org
-    SNI:
-        - regex.test.wmflabs.org
-    challenge: http-01
-    authorized_regexes:
-        - '^deployment-acmechief-testclient0[1-3]\.deployment-prep\.eqiad\.wmflabs$'
-    staging_time: 3600
-challenges:
-    dns-01:
-        validation_dns_servers:
-            - 127.0.0.1
-        sync_dns_servers:
-            - 127.0.0.1
-        zone_update_cmd: /usr/bin/dns-update-zone
-        zone_update_cmd_timeout: 30.5
-api:
-    clients_root_directory: /etc/custom-root-directory
-'''
-
-VALID_CONFIG_EXAMPLE_WITHOUT_DEFAULT_ACCOUNT = '''
-accounts:
-  - id: 621b49f9c6ccbbfbff9acb6e18f71205
-    directory: https://127.0.0.1:14000/dir
-  - id: ee566f9e436e120082f0770c0d58dd6d
-    directory: https://acme-staging-v02.api.letsencrypt.org/directory
-certificates:
-  default_account_certificate:
-    CN: acmechieftest.beta.wmflabs.org
-    SNI:
-        - acmechieftest.beta.wmflabs.org
-    challenge: http-01
-    staging_time: 3600
-  non_default_account_certificate:
-    account: 621b49f9c6ccbbfbff9acb6e18f71205
-    CN: 'test.wmflabs.org'
-    SNI:
-        - '*.test.wmflabs.org'
-    challenge: dns-01
-    staging_time: 3600
-challenges:
-    dns-01:
-        validation_dns_servers:
-            - 127.0.0.1
-        sync_dns_servers:
-            - 127.0.0.1
-'''
-
-CONFD_VALID_FILE_EXAMPLE = '''
-certname: default_account_certificate
-hostname: deployment-acmechief-testclient02.deployment-prep.eqiad.wmflabs
-'''
 
 class InfiniteLoopBreaker(Exception):
     """Exception to be raised when time.sleep() is mocked"""
-
-
-class ACMEChiefConfigTest(unittest.TestCase):
-    def setUp(self):
-        self.base_path = tempfile.TemporaryDirectory()
-        self.config_path = os.path.join(self.base_path.name, ACMEChief.config_path)
-        self.confd_path = os.path.join(self.base_path.name, ACMEChief.confd_path)
-        os.mkdir(self.confd_path)
-
-        with open(os.path.join(self.confd_path, 'confd_file_example.yaml'), 'w') as confd_file:
-            confd_file.write(CONFD_VALID_FILE_EXAMPLE)
-
-    def tearDown(self):
-        self.base_path.cleanup()
-
-    @mock.patch('os.access', return_value=True)
-    def test_config_parsing(self, access_mock):
-        with open(self.config_path, 'w') as config_file:
-            config_file.write(VALID_CONFIG_EXAMPLE)
-
-        config = ACMEChiefConfig.load(self.config_path, confd_path=self.confd_path)
-        self.assertEqual(len(config.accounts), 2)
-        self.assertEqual(len(config.certificates), 3)
-        self.assertEqual(config.default_account, 'ee566f9e436e120082f0770c0d58dd6d')
-        self.assertIn('default_account_certificate', config.authorized_hosts)
-        self.assertIn('deployment-acmechief-testclient02.deployment-prep.eqiad.wmflabs',
-                      config.authorized_hosts['default_account_certificate'])
-        self.assertIn('deployment-acmechief-testclient03.deployment-prep.eqiad.wmflabs',
-                      config.authorized_hosts['default_account_certificate'])
-        self.assertIn(ACMEChallengeType.DNS01, config.challenges)
-        self.assertEqual(config.certificates['default_account_certificate']['staging_time'],
-                         timedelta(seconds=3600))
-        self.assertEqual(config.certificates['non_default_account_certificate']['staging_time'],
-                         timedelta(seconds=7200))
-        self.assertIn(config.certificates['non_default_account_certificate']['CN'],
-                      config.certificates['non_default_account_certificate']['SNI'])
-        self.assertEqual(config.challenges[ACMEChallengeType.DNS01]['zone_update_cmd'], '/usr/bin/dns-update-zone')
-        self.assertEqual(config.challenges[ACMEChallengeType.DNS01]['zone_update_cmd_timeout'], 30.5)
-        access_mock.assert_called_once_with('/usr/bin/dns-update-zone', os.X_OK)
-        self.assertEqual(config.api['clients_root_directory'], '/etc/custom-root-directory')
-
-    def test_config_without_explicit_default(self):
-        with open(self.config_path, 'w') as config_file:
-            config_file.write(VALID_CONFIG_EXAMPLE_WITHOUT_DEFAULT_ACCOUNT)
-
-        config = ACMEChiefConfig.load(self.config_path, confd_path=self.confd_path)
-        self.assertEqual(config.default_account, '621b49f9c6ccbbfbff9acb6e18f71205')
-
-    def test_access_check(self):
-        with open(self.config_path, 'w') as config_file:
-            config_file.write(VALID_CONFIG_EXAMPLE)
-
-        config = ACMEChiefConfig.load(self.config_path, confd_path=self.confd_path)
-        self.assertTrue(config.check_access('deployment-acmechief-testclient03.deployment-prep.eqiad.wmflabs',
-                                            'default_account_certificate'))
-        self.assertTrue(config.check_access('deployment-acmechief-testclient02.deployment-prep.eqiad.wmflabs',
-                                            'default_account_certificate'))
-        self.assertFalse(config.check_access('deployment-acmechief-testclient04.deployment-prep.eqiad.wmflabs',
-                                             'default_account_certificate'))
-
-        self.assertTrue(config.check_access('deployment-acmechief-testclient03.deployment-prep.eqiad.wmflabs',
-                                            'certificate_auth_by_regex'))
-        self.assertTrue(config.check_access('deployment-acmechief-testclient02.deployment-prep.eqiad.wmflabs',
-                                            'certificate_auth_by_regex'))
-        self.assertFalse(config.check_access('deployment-acmechief-testclient04.deployment-prep.eqiad.wmflabs',
-                                             'certificate_auth_by_regex'))
 
 
 class CertificateStateTest(unittest.TestCase):

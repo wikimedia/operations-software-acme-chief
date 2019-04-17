@@ -42,7 +42,8 @@ from acme_chief.acme_requests import (ACMEAccount,
                                       ACMEInvalidChallengeError,
                                       ACMEIssuedCertificateError,
                                       ACMEOrderNotFound, ACMERequests,
-                                      ACMETimeoutFetchingCertificateError)
+                                      ACMETimeoutFetchingCertificateError,
+                                      DNS01ACMEValidator, HTTP01ACMEValidator)
 from acme_chief.config import ACMEChiefConfig
 from acme_chief.x509 import (Certificate, CertificateSaveMode,
                              CertificateSigningRequest, ECPrivateKey,
@@ -119,18 +120,19 @@ class CertificateStatus(Enum):
     INITIAL = 1
     SELF_SIGNED = 2           # initial self-signed certificate issued to let services start
     CSR_PUSHED = 3            # CSR pushed to the ACME directory and challenges saved on disk
-    CHALLENGES_VALIDATED = 4  # Challenges have been successfully validated
-    CHALLENGES_PUSHED = 5     # Challenges pushed to the ACME directory
-    CHALLENGES_REJECTED = 6   # Challenges have been rejected by the ACME directory
-    ORDER_FINALIZED = 7       # Order finalization request sent to the ACME directory
-    CERTIFICATE_ISSUED = 8    # Certificate issued by the ACME directory but still not persisted on disk
-    VALID = 9                 # Valid certificate succesfully persisted on disk
-    NEEDS_RENEWAL = 10        # Valid certificate that needs to be renew soon!
-    READY_TO_BE_PUSHED = 11   # New certificate issued and waiting to be pushed to ACMEChief.live_certs_path
-    EXPIRED = 12              # Expired certificate
-    SUBJECTS_CHANGED = 13     # Configuration of cert (CN/SANs) has changed, need to re-issue
-    ACMECHIEF_ERROR = 14      # Certificate issuance failed due to some ACMEChief non-recoverable error
-    ACMEDIR_ERROR = 15        # Certificate issuance failed due to some ACME directory non-recoverable error
+    PREVALIDATION_FAILED = 4  # Prevalidation failed. The configured certificate cannot be issued
+    CHALLENGES_VALIDATED = 5  # Challenges have been successfully validated
+    CHALLENGES_PUSHED = 6     # Challenges pushed to the ACME directory
+    CHALLENGES_REJECTED = 7   # Challenges have been rejected by the ACME directory
+    ORDER_FINALIZED = 8       # Order finalization request sent to the ACME directory
+    CERTIFICATE_ISSUED = 9    # Certificate issued by the ACME directory but still not persisted on disk
+    VALID = 10                # Valid certificate succesfully persisted on disk
+    NEEDS_RENEWAL = 11        # Valid certificate that needs to be renew soon!
+    READY_TO_BE_PUSHED = 12   # New certificate issued and waiting to be pushed to ACMEChief.live_certs_path
+    EXPIRED = 13              # Expired certificate
+    SUBJECTS_CHANGED = 14     # Configuration of cert (CN/SANs) has changed, need to re-issue
+    ACMECHIEF_ERROR = 15      # Certificate issuance failed due to some ACMEChief non-recoverable error
+    ACMEDIR_ERROR = 16        # Certificate issuance failed due to some ACME directory non-recoverable error
 
 
 class CertificateState:
@@ -144,7 +146,7 @@ class CertificateState:
                            CertificateStatus.CHALLENGES_PUSHED, CertificateStatus.ACMEDIR_ERROR,
                            CertificateStatus.ORDER_FINALIZED)
     STATUS_WITH_SLOW_RETRIES = (CertificateStatus.CHALLENGES_REJECTED, CertificateStatus.CERTIFICATE_ISSUED,
-                                CertificateStatus.ACMECHIEF_ERROR)
+                                CertificateStatus.ACMECHIEF_ERROR, CertificateStatus.PREVALIDATION_FAILED)
     MAX_CONSECUTIVE_RETRIES = 3
     MAX_RETRIES = 16
     SLOW_RETRY = datetime.timedelta(days=1)
@@ -446,6 +448,37 @@ class ACMEChief():
 
         return True
 
+    def _prevalidate(self, cert_id, key_type_id):
+        logger.info("Prevalidating CN and SNI list for %s / %s", cert_id, key_type_id)
+        cert_details = self.config.certificates[cert_id]
+        issuing_ca = self.config.challenges[ACMEChallengeType.DNS01]['issuing_ca']
+        if cert_details['challenge'] == 'dns-01':
+            valid_ns_servers = self.config.challenges[ACMEChallengeType.DNS01]['ns_records']
+            pre_validator = DNS01ACMEValidator(issuing_ca=issuing_ca, valid_ns_servers=valid_ns_servers)
+        else:
+            pre_validator = HTTP01ACMEValidator(issuing_ca=issuing_ca)
+
+        if not pre_validator.validate(cert_details['CN']):
+            logger.warning("Aborting new certificate. Prevalidation failed for CN %s for %s / %s",
+                           cert_details['CN'], cert_id, key_type_id)
+            return False
+
+        skipped_snis = set()
+        for sni in set(cert_details['SNI']) - {cert_details['CN']}:
+            if not pre_validator.validate(sni):
+                logger.warning("Prevalidation failed for SNI %s for %s / %s", sni, cert_id, key_type_id)
+                if not cert_details['skip_invalid_snis']:
+                    logger.warning("Aborting new certficate due to prevalidation failure for %s / %s",
+                                   cert_id, key_type_id)
+                    return False
+                skipped_snis.add(sni)
+
+        if skipped_snis:
+            logger.warning("Skipping the following SNIs: %s for %s / %s", skipped_snis, cert_id, key_type_id)
+            cert_details['SNI'] = list(set(cert_details['SNI']) - skipped_snis)
+
+        return True
+
     def _new_certificate(self, cert_id, key_type_id):
         """Handles new certificate requests. It does the following steps:
             - Generates and persists on disk a private key of key_type_id type
@@ -453,8 +486,13 @@ class ACMEChief():
             - Passes the ball to the next status handler
         """
         logger.info("Handling new certificate event for %s / %s", cert_id, key_type_id)
-        self._create_new_certificate_version(cert_id, key_type_id=key_type_id)
         cert_details = self.config.certificates[cert_id]
+
+        if cert_details['prevalidate'] and not self._prevalidate(cert_id, key_type_id):
+            return CertificateStatus.PREVALIDATION_FAILED
+
+        self._create_new_certificate_version(cert_id, key_type_id=key_type_id)
+
         key_type_details = KEY_TYPES[key_type_id]
         private_key = key_type_details['class']()
         private_key.generate(**key_type_details['params'])

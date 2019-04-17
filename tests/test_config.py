@@ -30,6 +30,8 @@ certificates:
         - '*.test.wmflabs.org'
     challenge: dns-01
     staging_time: 7200
+    prevalidate: true
+    skip_invalid_snis: true
   certificate_auth_by_regex:
     CN: regex.test.wmflabs.org
     SNI:
@@ -46,6 +48,11 @@ challenges:
             - 127.0.0.1
         zone_update_cmd: /usr/bin/dns-update-zone
         zone_update_cmd_timeout: 30.5
+        issuing_ca: 'letsencrypt.org'
+        ns_records:
+        - ns0.wikimedia.org.
+        - ns1.wikimedia.org.
+        - ns2.wikimedia.org.
 api:
     clients_root_directory: /etc/custom-root-directory
 '''
@@ -115,11 +122,19 @@ class ACMEChiefConfigTest(unittest.TestCase):
                          timedelta(seconds=3600))
         self.assertEqual(config.certificates['non_default_account_certificate']['staging_time'],
                          timedelta(seconds=7200))
+        self.assertFalse(config.certificates['default_account_certificate']['prevalidate'])
+        self.assertTrue(config.certificates['non_default_account_certificate']['prevalidate'])
+        self.assertFalse(config.certificates['default_account_certificate']['skip_invalid_snis'])
+        self.assertTrue(config.certificates['non_default_account_certificate']['skip_invalid_snis'])
         self.assertIn(config.certificates['non_default_account_certificate']['CN'],
                       config.certificates['non_default_account_certificate']['SNI'])
         self.assertEqual(config.challenges[ACMEChallengeType.DNS01]['zone_update_cmd'], '/usr/bin/dns-update-zone')
         self.assertEqual(config.challenges[ACMEChallengeType.DNS01]['zone_update_cmd_timeout'], 30.5)
         access_mock.assert_called_once_with('/usr/bin/dns-update-zone', os.X_OK)
+        self.assertEqual(config.challenges[ACMEChallengeType.DNS01]['issuing_ca'], 'letsencrypt.org')
+        self.assertEqual(config.challenges[ACMEChallengeType.DNS01]['ns_records'], ['ns0.wikimedia.org.',
+                                                                                    'ns1.wikimedia.org.',
+                                                                                    'ns2.wikimedia.org.'])
         self.assertEqual(config.api['clients_root_directory'], '/etc/custom-root-directory')
 
     def test_config_without_explicit_default(self):

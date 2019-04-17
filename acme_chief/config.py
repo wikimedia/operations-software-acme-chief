@@ -63,7 +63,7 @@ class ACMEChiefConfig:
             logger.warning('Missing dns-01 challenge configuration')
 
     @staticmethod
-    def load(file_name, confd_path=None):  # pylint: disable=too-many-locals
+    def load(file_name, confd_path=None):  # pylint: disable=too-many-locals,too-many-branches
         """Load a config from the specified file_name and an optional conf.d path"""
         logger.debug("Loading config file: %s", file_name)
         if confd_path is None:
@@ -101,6 +101,17 @@ class ACMEChiefConfig:
             if cert_config['CN'] not in cert_config['SNI']:
                 cert_config['SNI'].append(cert_config['CN'])
                 logger.warning("Appending CN to SNI list for certificate %s", cert_name)
+
+            if 'prevalidate' not in cert_config:
+                cert_config['prevalidate'] = False
+
+            if 'skip_invalid_snis' in cert_config:
+                if not cert_config['prevalidate']:
+                    logging.warning("Ignoring skip_invalid_snis because prevalidate is False for certificate %s",
+                                    cert_name)
+                    cert_config['skip_invalid_snis'] = False
+            else:
+                cert_config['skip_invalid_snis'] = False
 
             if 'authorized_hosts' in cert_config:
                 authorized_hosts[cert_name].update(cert_config['authorized_hosts'])

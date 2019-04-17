@@ -57,6 +57,13 @@ challenges:
         - 127.0.0.1
         zone_update_cmd: /bin/echo
         zone_update_cmd_timeout: 60.0
+        issuing_ca: 'letsencrypt.org'
+        ns_records:
+        - ns0.wikimedia.org.
+        - ns1.wikimedia.org.
+        - ns2.wikimedia.org.
+    http-01:
+        issuing_ca: 'letsencrypt.org'
 api:
     clients_root_directory: /etc/acmecerts
 ```

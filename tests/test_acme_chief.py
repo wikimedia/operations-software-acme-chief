@@ -17,6 +17,7 @@ from acme_chief.acme_requests import (ACMEAccount,
                                       ACMEChallengeValidation, ACMEError,
                                       ACMEInvalidChallengeError,
                                       ACMEIssuedCertificateError,
+                                      ACMEValidator,
                                       DNS01ACMEChallenge)
 from acme_chief.config import (DEFAULT_DNS_ZONE_UPDATE_CMD,
                                DEFAULT_DNS_ZONE_UPDATE_CMD_TIMEOUT)
@@ -109,6 +110,7 @@ class ACMEChiefTest(unittest.TestCase):
                     'SNI': ['acmechieftest.beta.wmflabs.org'],
                     'challenge': 'http-01',
                     'staging_time': timedelta(seconds=3600),
+                    'prevalidate': False,
                 },
             },
             default_account='1945e767ad72a532ebca519242a801bf',
@@ -385,6 +387,7 @@ class ACMEChiefStatusTransitionTests(unittest.TestCase):
                     'SNI': ['acmechieftest.beta.wmflabs.org'],
                     'challenge': 'http-01',
                     'staging_time': timedelta(seconds=3600),
+                    'prevalidate': False,
                 },
                 'test_certificate_dns01':
                 {
@@ -392,6 +395,16 @@ class ACMEChiefStatusTransitionTests(unittest.TestCase):
                     'SNI': ['acmechieftest.beta.wmflabs.org'],
                     'challenge': 'dns-01',
                     'staging_time': timedelta(seconds=3600),
+                    'prevalidate': False,
+                },
+                'test_certificate_prevalidate':
+                {
+                    'CN': 'acmechieftest.beta.wmflabs.org',
+                    'SNI': ['acmechieftest.beta.wmflabs.org', 'acmechieftest2.beta.wmflabs.org'],
+                    'challenge': 'dns-01',
+                    'staging_time': timedelta(seconds=3600),
+                    'prevalidate': True,
+                    'skip_invalid_snis': False,
                 },
             },
             default_account='1945e767ad72a532ebca519242a801bf',
@@ -404,6 +417,8 @@ class ACMEChiefStatusTransitionTests(unittest.TestCase):
                     'validation_dns_servers': ['127.0.0.1'],
                     'sync_dns_servers': ['127.0.0.1'],
                     'zone_update_cmd': '/usr/bin/update-zone-dns',
+                    'issuing_ca': 'letsencrypt.org',
+                    'ns_records': ['ns0.wmflabs.org.', 'ns1.wmflabs.org.'],
                 }
             },
             api={
@@ -534,6 +549,49 @@ class ACMEChiefStatusTransitionTests(unittest.TestCase):
         get_acme_session_mock.assert_has_calls(acme_session_calls)
         dns_challenge_mock.assert_not_called()
         self.assertEqual(status, CertificateStatus.CHALLENGES_PUSHED)
+
+    @mock.patch.object(ACMEValidator, 'validate')
+    @mock.patch.object(ACMEChief, '_create_new_certificate_version')
+    def test_new_certificate_prevalidation_fails_CN(self, new_certificate_mock, validate_mock):
+        validate_mock.return_value = False
+        status = self.instance._new_certificate('test_certificate_prevalidate', 'ec-prime256v1')
+        self.assertIs(status, CertificateStatus.PREVALIDATION_FAILED)
+        validate_mock.assert_called_once_with('acmechieftest.beta.wmflabs.org')
+
+    @mock.patch('acme_chief.acme_chief.CertificateSigningRequest')
+    @mock.patch.object(ACMEChief, '_trigger_dns_zone_update')
+    @mock.patch.object(ACMEChief, '_get_acme_session')
+    @mock.patch.object(ACMEChief, '_handle_pushed_csr')
+    @mock.patch.object(ACMEChief, '_create_new_certificate_version')
+    @mock.patch.object(ACMEValidator, 'validate')
+    def test_new_certificate_prevalidation_fails_SNI(self, validate_mock, new_certificate_mock,
+                                                     handle_pushed_csr_mock, get_acme_session_mock,
+                                                     dns_zone_update_mock, csr_mock):
+        validate_mock.side_effect = [True, False]
+        handle_pushed_csr_mock.return_value = CertificateStatus.VALID
+        dns_challenge_mock = mock.MagicMock()
+        dns_challenge_mock.file_name = 'mocked_challenged_file_name'
+        get_acme_session_mock.return_value.push_csr.return_value = {
+            ACMEChallengeType.DNS01: [dns_challenge_mock],
+        }
+
+        status = self.instance._new_certificate('test_certificate_prevalidate', 'ec-prime256v1')
+        self.assertIs(status, CertificateStatus.PREVALIDATION_FAILED)
+        validate_calls = [mock.call('acmechieftest.beta.wmflabs.org'),
+                          mock.call('acmechieftest2.beta.wmflabs.org')]
+        validate_mock.assert_has_calls(validate_calls)
+
+        # test again allowing acme-chief to skip invalid SNIs
+        validate_mock.reset_mock()
+        validate_mock.side_effect = [True, False]
+        self.instance.config.certificates['test_certificate_prevalidate']['skip_invalid_snis'] = True
+        status = self.instance._new_certificate('test_certificate_prevalidate', 'ec-prime256v1')
+        validate_mock.assert_has_calls(validate_calls)
+        self.assertIs(status, CertificateStatus.VALID)
+        # be sure that acmechieftest2.beta.wmflabs.org is not part of the CSR
+        csr_mock.assert_called_once_with(common_name='acmechieftest.beta.wmflabs.org',
+                                         private_key=self.ec_key_mock.return_value,
+                                         sans=['acmechieftest.beta.wmflabs.org'])
 
     @mock.patch.object(PrivateKeyLoader, 'load')
     def test_handle_pushed_csr_pkey_error(self, pkey_loader_mock):
@@ -758,6 +816,7 @@ class ACMEChiefDetermineStatusTest(unittest.TestCase):
                     'SNI': ['acmechieftest.alpha.wmflabs.org', 'acmechieftest.beta.wmflabs.org'],
                     'challenge': 'http-01',
                     'staging_time': timedelta(seconds=3600),
+                    'prevalidate': False,
                 },
             },
             default_account='1945e767ad72a532ebca519242a801bf',
@@ -991,6 +1050,7 @@ class ACMEChiefIntegrationTest(BasePebbleIntegrationTest):
                         'SNI': ['acmechieftest.beta.wmflabs.org'],
                         'challenge': challenge,
                         'staging_time': timedelta(seconds=0),
+                        'prevalidate': False,
                     },
                 },
                 default_account=account.account_id,
@@ -1064,6 +1124,7 @@ class ACMEChiefIntegrationTest(BasePebbleIntegrationTest):
                     'CN': 'acmechieftest.beta.wmflabs.org',
                     'SNI': ['acmechieftest.beta.wmflabs.org'],
                     'staging_time': timedelta(seconds=0),
+                    'prevalidate': False,
                 },
             },
             default_account=account.account_id,
@@ -1143,6 +1204,7 @@ class ACMEChiefIntegrationTest(BasePebbleIntegrationTest):
                     'CN': 'acmechieftest.beta.wmflabs.org',
                     'SNI': ['acmechieftest.beta.wmflabs.org'],
                     'challenge': 'http-01',
+                    'prevalidate': False,
                 },
             },
             default_account=account.account_id,
@@ -1216,6 +1278,7 @@ class ACMEChiefIntegrationTest(BasePebbleIntegrationTest):
                     'SNI': ['acmechieftest.beta.wmflabs.org'],
                     'challenge': 'http-01',
                     'staging_time': timedelta(0),
+                    'prevalidate': False,
                 },
             },
             default_account=account.account_id,

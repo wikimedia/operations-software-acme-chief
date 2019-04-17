@@ -77,3 +77,18 @@ class Resolver:
     def ns_query(self, name):
         """Perform a NS query. Returns a list of NS records associated to the specified name"""
         return self._query(name, 'NS')
+
+    def get_record(self, name, record_type):
+        """Gets the most accurate record for the specified name"""
+        if not name.endswith('.'):
+            name += '.'
+
+        parts = name.split('.')
+        for i in range(0, len(parts)-2):
+            candidate = '.'.join(parts[i:])
+            try:
+                return self._query(candidate, record_type)
+            except DNSNoAnswerError:
+                continue
+
+        return None

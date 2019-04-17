@@ -1,4 +1,5 @@
 import hashlib
+import itertools
 import os
 import tempfile
 import unittest
@@ -14,7 +15,9 @@ from acme_chief.acme_requests import (DEFAULT_DNS01_VALIDATION_TIMEOUT,
                                       ACMEChallengeNotValidatedError,
                                       ACMEChallengeType,
                                       ACMEChallengeValidation, ACMERequests,
-                                      DNS01ACMEChallenge, HTTP01ACMEChallenge)
+                                      ACMEValidator,
+                                      DNS01ACMEChallenge, HTTP01ACMEChallenge,
+                                      DNS01ACMEValidator, HTTP01ACMEValidator)
 from acme_chief.x509 import (CertificateSigningRequest, ECPrivateKey,
                              RSAPrivateKey)
 from tests.test_pebble import BasePebbleIntegrationTest
@@ -300,3 +303,141 @@ class ACMEIntegrationTests(BasePebbleIntegrationTest):
         sans = certificate.certificate.extensions.get_extension_for_oid(ExtensionOID.SUBJECT_ALTERNATIVE_NAME)
         self.assertEqual(sans.value.get_values_for_type(crypto_x509.DNSName),
                          ['tests.wmflabs.org', '*.tests.wmflabs.org'])
+
+
+class ACMEValidatorTest(unittest.TestCase):
+    @mock.patch('acme_chief.dns.Resolver.get_record')
+    def test_caa_validator(self, get_record_mock):
+        test_cases = (
+            {
+                'common_name': 'testdomain.org',
+                'caa_records': ('0 iodef "mailto:dns-admin@wikimedia.org"',),
+                'result': True,
+            },
+            {
+                'common_name': '*.testdomain.org',
+                'caa_records': ('0 iodef "mailto:dns-admin@wikimedia.org"',),
+                'result': True,
+            },
+            {
+                'common_name': 'testdomain.org',
+                'caa_records': ('0 issue ";"',),
+                'result': False,
+            },
+            {
+                'common_name': '*.testdomain.org',
+                'caa_records': ('0 issue ";"',),
+                'result': False,
+            },
+            {
+                'common_name': 'testdomain.org',
+                'caa_records':
+                (
+                    '0 issue "letsencrypt.org"',
+                    '0 issue "fakeca.org"',
+                    '0 iodef "mailto:dns-admin@wikimedia.org"',
+                ),
+                'result': True,
+            },
+            {
+                'common_name': 'testdomain.org',
+                'caa_records':
+                (
+                    '0 issue "letsencrypt.org"',
+                    '0 issuewild "fakeca.org"',
+                    '0 iodef "mailto:dns-admin@wikimedia.org"',
+                ),
+                'result': False,
+            },
+            {
+                'common_name': '*.testdomain.org',
+                'caa_records':
+                (
+                    '0 issue "letsencrypt.org"',
+                    '0 issuewild "fakeca.org"',
+                    '0 iodef "mailto:dns-admin@wikimedia.org"',
+                ),
+                'result': True,
+            },
+            {
+                'common_name': '*.testdomain.org',
+                'caa_records':
+                (
+                    '0 issue "fakeca.org"',
+                    '0 issuewild ";"',
+                    '0 iodef "mailto:dns-admin@wikimedia.org"',
+                ),
+                'result': False,
+            },
+            {
+                'common_name': 'testdomain.org',
+                'caa_records':
+                (
+                    '0 issue "letsencrypt.org"',
+                    '0 iodef "mailto:dns-admin@wikimedia.org"',
+                ),
+                'result': False,
+            },
+            {
+                'common_name': 'testdomain.org',
+                'caa_records':
+                (
+                    '0 issue "letsencrypt.org"',
+                    '0 issue ";"',
+                    '0 iodef "mailto:dns-admin@wikimedia.org"',
+                ),
+                'result': False,
+            },
+        )
+        validator = ACMEValidator(issuing_ca='fakeca.org')
+        for test_case in test_cases:
+            with self.subTest(common_name=test_case['common_name'],
+                              caa_records=test_case['caa_records'], result=test_case['result']):
+                get_record_mock.reset_mock()
+                get_record_mock.return_value = test_case['caa_records']
+                result = validator.validate(test_case['common_name'])
+                self.assertEqual(result, test_case['result'])
+                get_record_mock.assert_called_once_with('testdomain.org', 'CAA')
+
+
+class DNS01ACMEValidatorTests(unittest.TestCase):
+    @mock.patch('acme_chief.dns.Resolver.get_record')
+    def test_ns_validator(self, get_record_mock):
+        test_cases = (
+            {
+                'ns_records': ('ns2.wikimedia.org',),
+                'result': False,
+            },
+            {
+                'ns_records': ('ns0.wikimedia.org', 'ns1.wikimedia.org',),
+                'result': True,
+            },
+            {
+                'ns_records': ('ns0.wikimedia.org', 'ns1.wikimedia.org', 'ns2.wikimedia.org'),
+                'result': False,
+            }
+        )
+        dns01validator = DNS01ACMEValidator('fakeca.org', ('ns0.wikimedia.org', 'ns1.wikimedia.org'))
+
+        for test_case in test_cases:
+            with self.subTest(ns_records=test_case['ns_records'], result=test_case['result'], wildcard=False):
+                get_record_mock.reset_mock()
+                get_record_mock.return_value = test_case['ns_records']
+                result = dns01validator._validate_ns_record('www.testdomain.org')
+                self.assertEqual(result, test_case['result'])
+                get_record_mock.assert_called_once_with('www.testdomain.org', 'NS')
+
+    @mock.patch('acme_chief.acme_requests.DNS01ACMEValidator._validate_caa_record')
+    @mock.patch('acme_chief.acme_requests.DNS01ACMEValidator._validate_ns_record')
+    def test_validate(self, validate_ns_mock, validate_caa_mock):
+        for result in (True, False):
+            with self.subTest(result=result):
+                validate_ns_mock.reset_mock()
+                validate_caa_mock.reset_mock()
+                validate_caa_mock.return_value = True
+                validate_ns_mock.return_value = result
+                dns01validator = DNS01ACMEValidator('fakeca.org', ('ns0.wikimedia.org', 'ns1.wikimedia.org'))
+                ret = dns01validator.validate('testdomain.org')
+                self.assertEqual(ret, result)
+                validate_caa_mock.assert_called_once_with('testdomain.org')
+                validate_ns_mock.assert_called_once_with('testdomain.org')

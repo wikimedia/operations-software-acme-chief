@@ -8,6 +8,7 @@ import abc
 import hashlib
 import logging
 import os
+import re
 import time
 from collections import defaultdict
 from datetime import datetime, timedelta
@@ -17,6 +18,7 @@ from urllib.parse import urlunparse
 import josepy as jose
 import OpenSSL
 import requests
+
 from acme import client, errors, messages
 
 from acme_chief.dns import DNSFailedQueryError, DNSNoAnswerError, Resolver
@@ -33,6 +35,7 @@ HTTP_VALIDATOR_PROXIES = {
     'http': os.getenv('HTTP_PROXY'),
     'https': os.getenv('HTTPS_PROXY'),
 }
+DEFAULT_CHALLENGE_PREVALIDATION_TIMEOUT = 2.0
 DEFAULT_DNS01_VALIDATION_TIMEOUT = 2.0
 DEFAULT_HTTP01_VALIDATION_TIMEOUT = 2.0
 
@@ -507,3 +510,86 @@ class ACMERequests:
             raise ACMEError('Unable to revoke certificate') from revoke_error
         except requests.exceptions.RequestException as request_error:
             raise ACMETransportError('Unable to revoke certificate') from request_error
+
+
+class ACMEValidator:
+    """Generic ACME validation. CAA record check is performed here because affects every challenge"""
+    def __init__(self, issuing_ca):
+        self.issuing_ca = issuing_ca
+        self._resolver = Resolver(timeout=DEFAULT_CHALLENGE_PREVALIDATION_TIMEOUT)
+
+    def validate(self, name):
+        """Validates the specified name by calling all the callable _validate_* attributes found in the instance"""
+        ret = True
+        validators = {getattr(self, method_name) for method_name in dir(self) if method_name.startswith('_validate')}
+        for validator in validators:
+            if callable(validator):
+                ret &= validator(name)
+
+        return ret
+
+    def _validate_caa_record(self, name):
+        """CAA record validation. Heavily inspired by
+        https://github.com/letsencrypt/boulder/blob/1a59eabb2d742d8bf6478008d0dd252165f51a30/va/caa.go#L219-L307"""
+        caa_records = self._resolver.get_record(name.lstrip('*.'), 'CAA')
+        if caa_records is None:
+            logger.warning("%s doesn't have a CAA record configured", name)
+            return True  # lack of CAA record means that any CA can issue a certificate.
+
+        wildcard = name.startswith('*.')
+
+        issue_re = re.compile(r'^\d+ (?P<tag>issue|issuewild) "(?P<value>[\w\.-]+|;)"$')
+
+        records = {
+            'issue': set(),
+            'issuewild': set(),
+        }
+
+        for caa_record in caa_records:
+            match = issue_re.match(caa_record)
+            if match is None:
+                continue  # invalid or not interesting record
+
+            # Per RFC 6844 Section 5.3 "issueWild properties MUST be ignored when processing a request
+            # for a domain that is not a wildcard domain"
+            if not wildcard and match['tag'] == 'issuewild':
+                continue
+
+            records[match['tag']].add(match['value'])
+
+        if not records['issue']:
+            if not records['issuewild'] or not wildcard:
+                return True
+
+        if wildcard and records['issuewild']:
+            if self.issuing_ca in records['issuewild']:
+                return True
+            return False
+
+        if self.issuing_ca in records['issue']:
+            return True
+
+        return False
+
+
+class DNS01ACMEValidator(ACMEValidator):
+    """Validates that NS records of a specific domain points to the expected DNS servers"""
+    def __init__(self, issuing_ca, valid_ns_servers):
+        super().__init__(issuing_ca)
+        self.valid_ns_servers = valid_ns_servers
+
+    def _validate_ns_record(self, name):
+        """NS record validation"""
+        ns_records = self._resolver.get_record(name.lstrip('*.'), 'NS')
+        if ns_records is None:
+            return False
+
+        for ns_record in ns_records:
+            if ns_record not in self.valid_ns_servers:
+                return False
+
+        return True
+
+
+class HTTP01ACMEValidator(ACMEValidator):
+    """To be implemented"""

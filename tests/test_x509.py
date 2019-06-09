@@ -293,6 +293,7 @@ class CertificateTest(unittest.TestCase):
         self.assertEqual(cert.chain, [cert])
         self.assertFalse(cert.needs_renew())
         self.assertTrue(cert.self_signed)
+        self.assertIsNone(cert.ocsp_uri)
         mocked_now = until_date - datetime.timedelta(days=10)
         with mock.patch('acme_chief.x509.datetime') as mocked_datetime:
             mocked_datetime.utcnow = mock.Mock(return_value=mocked_now)
@@ -315,6 +316,7 @@ class CertificateTest(unittest.TestCase):
             cert_only = Certificate.load(cert_only_path)
             self.assertEqual(len(cert_only.chain), 1)
             self.assertEqual(cert_only.certificate.serial_number, FIRST_CERT_SERIAL_NUMBER)
+            self.assertEqual(cert_only.ocsp_uri, 'http://ocsp.digicert.com')
 
             chain_only = Certificate.load(chain_only_path)
             self.assertEqual(len(chain_only.chain), 1)

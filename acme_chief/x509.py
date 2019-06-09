@@ -16,7 +16,7 @@ from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec, rsa
 from cryptography.x509.extensions import ExtensionNotFound
-from cryptography.x509.oid import ExtensionOID, NameOID
+from cryptography.x509.oid import AuthorityInformationAccessOID, ExtensionOID, NameOID
 
 CRYPTOGRAPHY_BACKEND = default_backend()
 DEFAULT_RSA_KEY_SIZE = 2048
@@ -324,6 +324,20 @@ class Certificate:
             raise X509Error('Unexpected number of common name attributes')
 
         return name_attrs[0].value
+
+    @property
+    def ocsp_uri(self):
+        """Gets the OCSP URI of this certificate"""
+        try:
+            ext = self.certificate.extensions.get_extension_for_class(crypto_x509.extensions.AuthorityInformationAccess)
+        except crypto_x509.extensions.ExtensionNotFound:
+            return None
+
+        for description in ext.value:
+            if description.access_method == AuthorityInformationAccessOID.OCSP:
+                return description.access_location.value
+
+        return None
 
     @property
     def subject_alternative_names(self):

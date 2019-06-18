@@ -128,11 +128,12 @@ class CertificateStatus(Enum):
     CERTIFICATE_ISSUED = 9    # Certificate issued by the ACME directory but still not persisted on disk
     VALID = 10                # Valid certificate succesfully persisted on disk
     NEEDS_RENEWAL = 11        # Valid certificate that needs to be renew soon!
-    READY_TO_BE_PUSHED = 12   # New certificate issued and waiting to be pushed to ACMEChief.live_certs_path
-    EXPIRED = 13              # Expired certificate
-    SUBJECTS_CHANGED = 14     # Configuration of cert (CN/SANs) has changed, need to re-issue
-    ACMECHIEF_ERROR = 15      # Certificate issuance failed due to some ACMEChief non-recoverable error
-    ACMEDIR_ERROR = 16        # Certificate issuance failed due to some ACME directory non-recoverable error
+    CERTIFICATE_STAGED = 12   # Certificate issued and blocked by staging_time
+    READY_TO_BE_PUSHED = 13   # New certificate issued and waiting to be pushed to ACMEChief.live_certs_path
+    EXPIRED = 14              # Expired certificate
+    SUBJECTS_CHANGED = 15     # Configuration of cert (CN/SANs) has changed, need to re-issue
+    ACMECHIEF_ERROR = 16      # Certificate issuance failed due to some ACMEChief non-recoverable error
+    ACMEDIR_ERROR = 17        # Certificate issuance failed due to some ACME directory non-recoverable error
 
 
 class CertificateState:
@@ -289,7 +290,7 @@ class ACMEChief():
                 new_cert_path = self._get_path(cert_id, key_type_id, public=True, kind='new', cert_type='full_chain')
                 new_cert = Certificate.load(new_cert_path)
                 if new_cert.certificate.not_valid_before > certificate.certificate.not_valid_before:
-                    return CertificateStatus.READY_TO_BE_PUSHED
+                    return CertificateStatus.CERTIFICATE_STAGED
             except OSError:
                 pass
 
@@ -723,15 +724,32 @@ class ACMEChief():
 
     def _handle_ready_to_be_pushed(self, cert_id, key_type_id):
         """Handles READY_TO_BE_PUSHED status. Performs the following actions:
-            - Checks if the certificate is ready to be pushed to live_certs_path
-            - Pushes the cerfificate iff it's ready to be pushed.
+            - Validates the staging time
+            - Attempts to push the certificate if the staging time has been honored or is a new certificate
+              being issued for the first time.
         """
+        bypass_staging_time_checks = False
+        try:
+            live_cert = Certificate.load(self._get_path(cert_id, key_type_id, public=True, kind='live'))
+            if live_cert.self_signed:
+                bypass_staging_time_checks = True
+        except (OSError, X509Error):
+            bypass_staging_time_checks = True
+
+        if bypass_staging_time_checks:
+            logger.info("Bypassing staging_time for %s / %s", cert_id, key_type_id)
+            return self._push_live_certificate(cert_id)
+
+        logger.info("Enforcing staging_time for %s / %s", cert_id, key_type_id)
+
         try:
             cert = Certificate.load(self._get_path(cert_id, key_type_id,
                                                    public=True, kind='new', cert_type='full_chain'))
             staging_timedelta = self.config.certificates[cert_id]['staging_time']
             if cert.certificate.not_valid_before >= (datetime.datetime.utcnow() - staging_timedelta):
-                return CertificateStatus.READY_TO_BE_PUSHED
+                logger.info("Staging_time will be enforced for %s / %s till %s",
+                            cert_id, key_type_id, cert.certificate.not_valid_before + staging_timedelta)
+                return CertificateStatus.CERTIFICATE_STAGED
         except (OSError, X509Error):
             logger.exception("Problem verifying not valid before date on certificate %s / %s",
                              cert_id, key_type_id)
@@ -813,6 +831,8 @@ class ACMEChief():
                         new_status = self._handle_pushed_challenges(cert_id, key_type_id)
                     elif cert_state.status is CertificateStatus.ORDER_FINALIZED:
                         new_status = self._handle_order_finalized(cert_id, key_type_id)
+                    elif cert_state.status is CertificateStatus.CERTIFICATE_STAGED:
+                        new_status = self._handle_ready_to_be_pushed(cert_id, key_type_id)
                     elif cert_state.status is CertificateStatus.READY_TO_BE_PUSHED:
                         new_status = self._push_live_certificate(cert_id)
                     else:

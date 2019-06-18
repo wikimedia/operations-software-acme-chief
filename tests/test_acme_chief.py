@@ -796,8 +796,9 @@ class ACMEChiefStatusTransitionTests(unittest.TestCase):
     @mock.patch.object(ACMEChief, '_push_live_certificate')
     def test_handle_ready_to_be_pushed_not_ready(self, push_live_mock, get_path_mock, load_mock):
         load_mock.return_value.certificate.not_valid_before = datetime.utcnow()
+        load_mock.return_value.self_signed = False
         status = self.instance._handle_ready_to_be_pushed('test_certificate', 'rsa-2048')
-        self.assertEqual(status, CertificateStatus.READY_TO_BE_PUSHED)
+        self.assertEqual(status, CertificateStatus.CERTIFICATE_STAGED)
         push_live_mock.assert_not_called()
 
 
@@ -848,7 +849,7 @@ class ACMEChiefDetermineStatusTest(unittest.TestCase):
         elif status is CertificateStatus.NEEDS_RENEWAL:
             return_value.certificate.not_valid_after = datetime.utcnow() + timedelta(days=10)
             return_value.needs_renew.return_value = True
-        elif status is CertificateStatus.READY_TO_BE_PUSHED:
+        elif status is CertificateStatus.CERTIFICATE_STAGED:
             return_value.certificate.not_valid_before = datetime(2019, 1, 1)
         elif status is CertificateStatus.VALID:
             return_value.certificate.not_valid_after = datetime.utcnow() + timedelta(days=10)
@@ -883,11 +884,11 @@ class ACMEChiefDetermineStatusTest(unittest.TestCase):
                     self.assertEqual(cert_status.status, test_status)
 
     @mock.patch.object(Certificate, 'load')
-    def test_initial_status_ready_to_be_pushed(self, load_mock):
+    def test_initial_status_certificate_staged(self, load_mock):
         load_mock.side_effect = [self._configure_load_return_value(CertificateStatus.VALID),
-                                 self._configure_load_return_value(CertificateStatus.READY_TO_BE_PUSHED),
+                                 self._configure_load_return_value(CertificateStatus.CERTIFICATE_STAGED),
                                  self._configure_load_return_value(CertificateStatus.VALID),
-                                 self._configure_load_return_value(CertificateStatus.READY_TO_BE_PUSHED)]
+                                 self._configure_load_return_value(CertificateStatus.CERTIFICATE_STAGED)]
         status = self.instance._set_cert_status()
         load_calls = [mock.call(self.instance._get_path('test_certificate', 'ec-prime256v1',
                                                         public=True, kind='live')),
@@ -903,7 +904,7 @@ class ACMEChiefDetermineStatusTest(unittest.TestCase):
         for certificate in self.instance.config.certificates:
             self.assertEqual(len(status[certificate]), len(KEY_TYPES))
             for cert_status in status[certificate].values():
-                self.assertEqual(cert_status.status, CertificateStatus.READY_TO_BE_PUSHED)
+                self.assertEqual(cert_status.status, CertificateStatus.CERTIFICATE_STAGED)
 
 
     @mock.patch.object(Certificate, 'load')
@@ -1280,10 +1281,19 @@ class ACMEChiefIntegrationTest(BasePebbleIntegrationTest):
                     'staging_time': timedelta(0),
                     'prevalidate': False,
                 },
+                'test_certificate_staged':
+                {
+                    'CN': 'acmechieftest.beta.wmflabs.org',
+                    'SNI': ['acmechieftest.beta.wmflabs.org'],
+                    'challenge': 'http-01',
+                    'staging_time': timedelta(seconds=7200),
+                    'prevalidate': False,
+                },
             },
             default_account=account.account_id,
             authorized_hosts={
-                'test_certificate': ['localhost']
+                'test_certificate': ['localhost'],
+                'test_certificate_staged': ['localhost'],
             },
             authorized_regexes={},
             challenges={
@@ -1296,34 +1306,44 @@ class ACMEChiefIntegrationTest(BasePebbleIntegrationTest):
                 'clients_root_directory': '/etc/acmecerts',
             }
         )
-        acme_chief.cert_status = {'test_certificate': {
-            'ec-prime256v1': CertificateState(CertificateStatus.INITIAL),
-            'rsa-2048': CertificateState(CertificateStatus.INITIAL),
-        }}
+        acme_chief.cert_status = {
+            'test_certificate': {
+                'ec-prime256v1': CertificateState(CertificateStatus.INITIAL),
+                'rsa-2048': CertificateState(CertificateStatus.INITIAL),
+            },
+            'test_certificate_staged': {
+                'ec-prime256v1': CertificateState(CertificateStatus.INITIAL),
+                'rsa-2048': CertificateState(CertificateStatus.INITIAL),
+            },
+        }
 
         # Step 3 - Generate self signed certificates
         acme_chief.create_initial_certs()
 
         # Step 4 - run two iterations of certificate management
+        print("======= Running Step 4 ========")
         for _ in range(2):
             with self.assertRaises(InfiniteLoopBreaker):
                 acme_chief.certificate_management()
         for cert_id in acme_chief.cert_status:
             for key_type_id in KEY_TYPES:
+                print("===== trying to load {}/{} =====".format(cert_id, key_type_id))
                 self.assertEqual(acme_chief.cert_status[cert_id][key_type_id].status, CertificateStatus.VALID)
                 cert = Certificate.load(acme_chief._get_path(cert_id, key_type_id, public=True, kind='live'))
                 self.assertEqual(cert.subject_alternative_names, ['acmechieftest.beta.wmflabs.org'])
                 self.assertFalse(cert.self_signed)
 
         # Step 5 - Add a new SNI
+        print("======= Running Step 5 ========")
         acme_chief.config.certificates['test_certificate']['SNI'].append('acmechieftest.alpha.wmflabs.org')
+        acme_chief.config.certificates['test_certificate_staged']['SNI'].append('acmechieftest.alpha.wmflabs.org')
 
         # Step 6 - Trigger certificate status evaluation
         acme_chief.cert_status = acme_chief._set_cert_status()
         for cert_id in acme_chief.cert_status:
             for key_type_id in KEY_TYPES:
                 self.assertEqual(acme_chief.cert_status[cert_id][key_type_id].status,
-                                 CertificateStatus.SUBJECTS_CHANGED)
+                                CertificateStatus.SUBJECTS_CHANGED)
 
         # Step 7 - Run another two iterations of certificate management
         for _ in range(2):
@@ -1332,8 +1352,13 @@ class ACMEChiefIntegrationTest(BasePebbleIntegrationTest):
 
         for cert_id in acme_chief.cert_status:
             for key_type_id in KEY_TYPES:
-                self.assertEqual(acme_chief.cert_status[cert_id][key_type_id].status, CertificateStatus.VALID)
                 cert = Certificate.load(acme_chief._get_path(cert_id, key_type_id, public=True, kind='live'))
-                self.assertEqual(cert.subject_alternative_names, ['acmechieftest.beta.wmflabs.org',
-                                                                  'acmechieftest.alpha.wmflabs.org'])
+                if cert_id == 'test_certificate':
+                    self.assertEqual(acme_chief.cert_status[cert_id][key_type_id].status, CertificateStatus.VALID)
+                    self.assertEqual(cert.subject_alternative_names, ['acmechieftest.beta.wmflabs.org',
+                                                                        'acmechieftest.alpha.wmflabs.org'])
+                elif cert_id == 'test_certificate_staged':
+                    self.assertEqual(acme_chief.cert_status[cert_id][key_type_id].status,
+                                     CertificateStatus.CERTIFICATE_STAGED)
+                    self.assertEqual(cert.subject_alternative_names, ['acmechieftest.beta.wmflabs.org'])
                 self.assertFalse(cert.self_signed)

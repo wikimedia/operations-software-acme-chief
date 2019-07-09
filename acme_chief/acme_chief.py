@@ -150,6 +150,7 @@ class CertificateState:
                                 CertificateStatus.ACMECHIEF_ERROR, CertificateStatus.PREVALIDATION_FAILED)
     MAX_CONSECUTIVE_RETRIES = 3
     MAX_RETRIES = 16
+    CERTIFICATE_STAGED_RETRY = datetime.timedelta(seconds=3600)
     SLOW_RETRY = datetime.timedelta(days=1)
 
     def __init__(self, status):
@@ -191,7 +192,10 @@ class CertificateState:
 
         if value not in CertificateState.STATUS_WITH_RETRIES + CertificateState.STATUS_WITH_SLOW_RETRIES:
             self._retries = 0
-            self._next_retry = datetime.datetime.fromtimestamp(0)
+            if value is CertificateStatus.CERTIFICATE_STAGED:
+                self._next_retry = datetime.datetime.utcnow() + CertificateState.CERTIFICATE_STAGED_RETRY
+            else:
+                self._next_retry = datetime.datetime.fromtimestamp(0)
             return
 
         self._retries += 1

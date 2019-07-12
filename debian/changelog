@@ -1,3 +1,9 @@
+acme-chief (0.19-1) buster-wikimedia; urgency=medium
+
+  acme_chief: Avoid retrying too eagerly on CERTIFICATE_STAGED status
+
+ -- Valentin Gutierrez <vgutierrez@wikimedia.org>  Fri, 12 Jul 2019 13:05:25 +0700
+
 acme-chief (0.18-1) buster-wikimedia; urgency=medium
 
   acme_chief: Enforce staging time validation

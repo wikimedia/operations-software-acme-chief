@@ -410,8 +410,9 @@ class ACMEChief():
                     from_date=datetime.datetime.utcnow(),
                     until_date=datetime.datetime.utcnow() + datetime.timedelta(days=3),
                 ).pem)
-                path = self._get_path(cert_id, key_type_id, public=True, kind='new', cert_type='full_chain')
-                cert.save(path, mode=CertificateSaveMode.FULL_CHAIN)
+                for cert_type, cert_type_details in CERTIFICATE_TYPES.items():
+                    cert.save(self._get_path(cert_id, key_type_id, public=True, kind='new', cert_type=cert_type),
+                              mode=cert_type_details['save_mode'])
                 self.cert_status[cert_id][key_type_id].status = CertificateStatus.SELF_SIGNED
                 self._push_live_certificate(cert_id)
 
@@ -718,8 +719,9 @@ class ACMEChief():
             return CertificateStatus.ACMEDIR_ERROR
 
         try:
-            certificate.save(self._get_path(cert_id, key_type_id, public=True, kind='new', cert_type='full_chain'),
-                             mode=CertificateSaveMode.FULL_CHAIN)
+            for cert_type, cert_type_details in CERTIFICATE_TYPES.items():
+                certificate.save(self._get_path(cert_id, key_type_id, public=True, kind='new', cert_type=cert_type),
+                                 mode=cert_type_details['save_mode'])
         except OSError:
             logger.exception("Problem persisting certificate %s / %s on disk", cert_id, key_type_id)
             return CertificateStatus.CERTIFICATE_ISSUED
@@ -773,11 +775,8 @@ class ACMEChief():
         for key_type_id in KEY_TYPES:
             try:
                 _ = PrivateKeyLoader.load(self._get_path(cert_id, key_type_id, public=False, kind='new'))
-                cert = Certificate.load(self._get_path(cert_id, key_type_id,
-                                                       public=True, kind='new', cert_type='full_chain'))
-                for cert_type, cert_type_details in CERTIFICATE_TYPES.items():
-                    cert.save(self._get_path(cert_id, key_type_id, public=True, kind='new', cert_type=cert_type),
-                              mode=cert_type_details['save_mode'])
+                _ = Certificate.load(self._get_path(cert_id, key_type_id,
+                                                    public=True, kind='new', cert_type='full_chain'))
             except FileNotFoundError:
                 logger.info("Waiting till %s / %s is generated to be able to push the new certificate",
                             cert_id, key_type_id)

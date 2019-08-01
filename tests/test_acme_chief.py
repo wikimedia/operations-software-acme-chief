@@ -231,6 +231,18 @@ class ACMEChiefTest(unittest.TestCase):
                                     'rsa-2048',
                                     public=True,
                                     kind='new',
+                                    cert_type='cert_only'), mode=CertificateSaveMode.CERT_ONLY),
+                                    mock.call().save(
+                                    self.instance._get_path('test_certificate',
+                                    'rsa-2048',
+                                    public=True,
+                                    kind='new',
+                                    cert_type='chain_only'), mode=CertificateSaveMode.CHAIN_ONLY),
+                                    mock.call().save(
+                                    self.instance._get_path('test_certificate',
+                                    'rsa-2048',
+                                    public=True,
+                                    kind='new',
                                     cert_type='full_chain'), mode=CertificateSaveMode.FULL_CHAIN)])
         push_live_mock.assert_called_once_with('test_certificate')
 
@@ -772,6 +784,16 @@ class ACMEChiefStatusTransitionTests(unittest.TestCase):
         get_acme_session_mock.assert_called_once()
         acme_session_calls = [mock.call(self.instance.config.certificates['test_certificate']),
                               mock.call().get_certificate(csr_mock.generate_csr_id.return_value),
+                              mock.call().get_certificate().save(self.instance._get_path('test_certificate',
+                                                                                         'rsa-2048', public=True,
+                                                                                         kind='new',
+                                                                                         cert_type='cert_only'),
+                                                                 mode=CertificateSaveMode.CERT_ONLY),
+                              mock.call().get_certificate().save(self.instance._get_path('test_certificate',
+                                                                                         'rsa-2048', public=True,
+                                                                                         kind='new',
+                                                                                         cert_type='chain_only'),
+                                                                 mode=CertificateSaveMode.CHAIN_ONLY),
                               mock.call().get_certificate().save(self.instance._get_path('test_certificate',
                                                                                          'rsa-2048', public=True,
                                                                                          kind='new',

@@ -1,3 +1,9 @@
+acme-chief (0.20-1) buster-wikimedia; urgency=medium
+
+  acme_chief: Save the certificate using the 3 save modes on issuance time
+
+ -- Valentin Gutierrez <vgutierrez@wikimedia.org>  Fri, 02 Aug 2019 11:36:27 +0700
+
 acme-chief (0.19-1) buster-wikimedia; urgency=medium
 
   acme_chief: Avoid retrying too eagerly on CERTIFICATE_STAGED status

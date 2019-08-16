@@ -22,6 +22,7 @@ DEFAULT_DNS_ZONE_UPDATE_CMD = '/bin/echo'
 DEFAULT_DNS_ZONE_UPDATE_CMD_TIMEOUT = 60.0
 
 DEFAULT_CERTIFICATE_STAGING_TIME = 3600
+DEFAULT_OCSP_RESPONSE_UPDATE_THRESHOLD = 172800
 
 DEFAULT_API_CLIENTS_ROOT_DIRECTORY = '/etc/acmecerts'
 
@@ -97,6 +98,15 @@ class ACMEChiefConfig:
                 logger.warning("Ignoring invalid staging time %s for certificate %s. Using the default one: %s",
                                staging_time_seconds, cert_name, DEFAULT_CERTIFICATE_STAGING_TIME)
                 cert_config['staging_time'] = datetime.timedelta(seconds=DEFAULT_CERTIFICATE_STAGING_TIME)
+
+            ocsp_update_threshold_seconds = cert_config.get('ocsp_update_threshold',
+                                                            DEFAULT_OCSP_RESPONSE_UPDATE_THRESHOLD)
+            try:
+                cert_config['ocsp_update_threshold'] = datetime.timedelta(seconds=int(ocsp_update_threshold_seconds))
+            except TypeError:
+                logger.warning("Ignoring bogus OCSP update threshold %s for certificate %s. Using the default one: %s",
+                               staging_time_seconds, cert_name, DEFAULT_CERTIFICATE_STAGING_TIME)
+                cert_config['ocsp_update_threshold'] = datetime.timedelta(seconds=int(ocsp_update_threshold_seconds))
 
             if cert_config['CN'] not in cert_config['SNI']:
                 cert_config['SNI'].append(cert_config['CN'])

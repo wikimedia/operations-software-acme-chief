@@ -45,6 +45,7 @@ from acme_chief.acme_requests import (ACMEAccount,
                                       ACMETimeoutFetchingCertificateError,
                                       DNS01ACMEValidator, HTTP01ACMEValidator)
 from acme_chief.config import ACMEChiefConfig
+from acme_chief.ocsp import OCSPRequest, OCSPResponse, OCSPResponseError
 from acme_chief.x509 import (Certificate, CertificateSaveMode,
                              CertificateSigningRequest, ECPrivateKey,
                              PrivateKeyLoader, RSAPrivateKey,
@@ -250,9 +251,9 @@ class ACMEChief():
             # Attempt to load the private key and cert file for key_type_id. Generate a new version if everything
             # goes as expected
             try:
-                PrivateKeyLoader.load(self._get_path(cert_id, key_type_id, public=False, kind='new'))
+                PrivateKeyLoader.load(self._get_path(cert_id, key_type_id, file_type='key', kind='new'))
                 Certificate.load(self._get_path(cert_id, key_type_id,
-                                                public=True, kind='new', cert_type='full_chain'))
+                                                file_type='cert', kind='new', cert_type='full_chain'))
                 logger.debug("%s / %s loaded successfully, we need another version")
             except (OSError, X509Error):
                 if pathlib.Path(self._get_symlink_path(cert_id, 'new')).exists():
@@ -275,11 +276,15 @@ class ACMEChief():
     def _get_symlink_path(self, cert_id, kind='live'):
         return os.path.join(self.certs_path, cert_id, kind)
 
-    def _get_path(self, cert_id, key_type_id, public=True, kind='live', cert_type='cert_only'):
-        if public:
+    def _get_path(self, cert_id, key_type_id, file_type='cert', kind='live', cert_type='cert_only'):
+        if file_type == 'cert':
             file_name = CERTIFICATE_TYPES[cert_type]['file_name'].format(key_type_id=key_type_id)
-        else:
+        elif file_type == 'key':
             file_name = '{}.key'.format(key_type_id)
+        elif file_type == 'ocsp':
+            file_name = '{}.ocsp'.format(key_type_id)
+        else:
+            raise ValueError('Unknown file_type {}'.format(file_type))
 
         return os.path.join(self.certs_path, cert_id, kind, file_name)
 
@@ -291,7 +296,8 @@ class ACMEChief():
 
         def _get_certificate_status(cert_id, key_type_id, certificate):  # pylint: disable=too-many-return-statements
             try:
-                new_cert_path = self._get_path(cert_id, key_type_id, public=True, kind='new', cert_type='full_chain')
+                new_cert_path = self._get_path(cert_id, key_type_id, file_type='cert',
+                                               kind='new', cert_type='full_chain')
                 new_cert = Certificate.load(new_cert_path)
                 if new_cert.certificate.not_valid_before > certificate.certificate.not_valid_before:
                     return CertificateStatus.CERTIFICATE_STAGED
@@ -342,7 +348,7 @@ class ACMEChief():
                     pass
 
                 try:
-                    certificate = Certificate.load(self._get_path(cert_id, key_type_id, public=True, kind='live'))
+                    certificate = Certificate.load(self._get_path(cert_id, key_type_id, file_type='cert', kind='live'))
                     new_status = _get_certificate_status(cert_id, key_type_id, certificate)
                 except (OSError, X509Error):
                     new_status = CertificateStatus.INITIAL
@@ -401,7 +407,7 @@ class ACMEChief():
                 logger.info("Creating initial self-signed certificate for %s / %s", cert_id, key_type_id)
                 key = key_type_details['class']()
                 key.generate(**key_type_details['params'])
-                key.save(self._get_path(cert_id, key_type_id, public=False, kind='new'))
+                key.save(self._get_path(cert_id, key_type_id, file_type='key', kind='new'))
 
                 cert = Certificate(SelfSignedCertificate(
                     private_key=key,
@@ -411,7 +417,7 @@ class ACMEChief():
                     until_date=datetime.datetime.utcnow() + datetime.timedelta(days=3),
                 ).pem)
                 for cert_type, cert_type_details in CERTIFICATE_TYPES.items():
-                    cert.save(self._get_path(cert_id, key_type_id, public=True, kind='new', cert_type=cert_type),
+                    cert.save(self._get_path(cert_id, key_type_id, file_type='cert', kind='new', cert_type=cert_type),
                               mode=cert_type_details['save_mode'])
                 self.cert_status[cert_id][key_type_id].status = CertificateStatus.SELF_SIGNED
                 self._push_live_certificate(cert_id)
@@ -502,7 +508,7 @@ class ACMEChief():
         key_type_details = KEY_TYPES[key_type_id]
         private_key = key_type_details['class']()
         private_key.generate(**key_type_details['params'])
-        private_key.save(self._get_path(cert_id, key_type_id, public=False, kind='new'))
+        private_key.save(self._get_path(cert_id, key_type_id, file_type='key', kind='new'))
 
         csr_filename = '{}.{}.csr.pem'.format(cert_id, key_type_id)
         csr_fullpath = os.path.join(self.csrs_path, csr_filename)
@@ -550,7 +556,7 @@ class ACMEChief():
         """
         logger.info("Handling pushed CSR event for %s / %s", cert_id, key_type_id)
         try:
-            private_key = PrivateKeyLoader.load(self._get_path(cert_id, key_type_id, public=False, kind='new'))
+            private_key = PrivateKeyLoader.load(self._get_path(cert_id, key_type_id, file_type='key', kind='new'))
         except (OSError, X509Error):
             logger.exception("Failed to load new private key for certificate %s / %s",
                              cert_id, key_type_id)
@@ -599,7 +605,7 @@ class ACMEChief():
         """
         logger.info("Handling validated challenges event for %s / %s", cert_id, key_type_id)
         try:
-            private_key = PrivateKeyLoader.load(self._get_path(cert_id, key_type_id, public=False, kind='new'))
+            private_key = PrivateKeyLoader.load(self._get_path(cert_id, key_type_id, file_type='key', kind='new'))
         except (OSError, X509Error):
             logger.exception("Failed to load new private key for certificate %s / %s",
                              cert_id, key_type_id)
@@ -641,7 +647,7 @@ class ACMEChief():
         """
         logger.info("Handling pushed challenges event for %s / %s", cert_id, key_type_id)
         try:
-            private_key = PrivateKeyLoader.load(self._get_path(cert_id, key_type_id, public=False, kind='new'))
+            private_key = PrivateKeyLoader.load(self._get_path(cert_id, key_type_id, file_type='key', kind='new'))
         except (OSError, X509Error):
             logger.exception("Failed to load new private key for certificate %s / %s",
                              cert_id, key_type_id)
@@ -687,7 +693,7 @@ class ACMEChief():
         """
         logger.info("Handling order finalized event for %s / %s", cert_id, key_type_id)
         try:
-            private_key = PrivateKeyLoader.load(self._get_path(cert_id, key_type_id, public=False, kind='new'))
+            private_key = PrivateKeyLoader.load(self._get_path(cert_id, key_type_id, file_type='key', kind='new'))
         except (OSError, X509Error):
             logger.exception("Failed to load new private key for certificate %s / %s",
                              cert_id, key_type_id)
@@ -720,7 +726,8 @@ class ACMEChief():
 
         try:
             for cert_type, cert_type_details in CERTIFICATE_TYPES.items():
-                certificate.save(self._get_path(cert_id, key_type_id, public=True, kind='new', cert_type=cert_type),
+                certificate.save(self._get_path(cert_id, key_type_id, file_type='cert',
+                                                kind='new', cert_type=cert_type),
                                  mode=cert_type_details['save_mode'])
         except OSError:
             logger.exception("Problem persisting certificate %s / %s on disk", cert_id, key_type_id)
@@ -736,7 +743,7 @@ class ACMEChief():
         """
         bypass_staging_time_checks = False
         try:
-            live_cert = Certificate.load(self._get_path(cert_id, key_type_id, public=True, kind='live'))
+            live_cert = Certificate.load(self._get_path(cert_id, key_type_id, file_type='cert', kind='live'))
             if live_cert.self_signed:
                 bypass_staging_time_checks = True
         except (OSError, X509Error):
@@ -750,7 +757,7 @@ class ACMEChief():
 
         try:
             cert = Certificate.load(self._get_path(cert_id, key_type_id,
-                                                   public=True, kind='new', cert_type='full_chain'))
+                                                   file_type='cert', kind='new', cert_type='full_chain'))
             staging_timedelta = self.config.certificates[cert_id]['staging_time']
             if cert.certificate.not_valid_before >= (datetime.datetime.utcnow() - staging_timedelta):
                 logger.info("Staging_time will be enforced for %s / %s till %s",
@@ -774,9 +781,9 @@ class ACMEChief():
         logger.info("Pushing the new certificate for %s", cert_id)
         for key_type_id in KEY_TYPES:
             try:
-                _ = PrivateKeyLoader.load(self._get_path(cert_id, key_type_id, public=False, kind='new'))
+                _ = PrivateKeyLoader.load(self._get_path(cert_id, key_type_id, file_type='key', kind='new'))
                 _ = Certificate.load(self._get_path(cert_id, key_type_id,
-                                                    public=True, kind='new', cert_type='full_chain'))
+                                                    file_type='cert', kind='new', cert_type='full_chain'))
             except FileNotFoundError:
                 logger.info("Waiting till %s / %s is generated to be able to push the new certificate",
                             cert_id, key_type_id)
@@ -803,6 +810,43 @@ class ACMEChief():
 
         return CertificateStatus.VALID
 
+    def _fetch_ocsp_response(self, cert_id, key_type_id):
+        """Fetches OCSP responses for certificates in VALID or CERTIFICATE_STAGED states"""
+        for kind in ('live', 'new'):
+            cert = Certificate.load(self._get_path(cert_id, key_type_id,
+                                                   file_type='cert', kind=kind, cert_type='full_chain'))
+            if cert.ocsp_uri is None:
+                continue
+
+            ocsp_response_path = self._get_path(cert_id, key_type_id, file_type='ocsp', kind=kind)
+            cert_details = self.config.certificates[cert_id]
+            refresh = False
+            try:
+                ocsp_response = OCSPResponse.load(ocsp_response_path)
+                if ocsp_response.next_update - datetime.datetime.utcnow() < cert_details['ocsp_update_threshold']:
+                    refresh = True
+            except FileNotFoundError:
+                refresh = True
+            except (OSError, OCSPResponseError):
+                logger.exception('Unexpected error opening %s OCSP response for %s / %s', kind, cert_id, key_type_id)
+                refresh = True
+
+            if not refresh:
+                continue
+
+            logger.info("Refreshing %s OCSP response for certificate %s / %s", kind, cert_id, key_type_id)
+
+            ocsp_request = OCSPRequest(cert, cert.chain[1])
+            try:
+                ocsp_response = ocsp_request.fetch_response()
+                ocsp_response.save(ocsp_response_path)
+            except OCSPResponseError:
+                logger.exception("Unable to fetch %s OCSP response for %s / %s", kind, cert_id, key_type_id)
+            except OSError:
+                logger.exception("Unable to persist %s OCSP response for %s / %s on disk", kind, cert_id, key_type_id)
+
+            logger.info("%s OCSP response refreshed successfully for %s / %s", kind, cert_id, key_type_id)
+
     def certificate_management(self):
         """
         This functions is started in a thread to perform regular tasks.
@@ -818,6 +862,7 @@ class ACMEChief():
                         logger.debug("Skipping certificate %s till at least %s", cert_id, cert_state.next_retry)
                         continue
                     if cert_state.status is CertificateStatus.VALID:
+                        self._fetch_ocsp_response(cert_id, key_type_id)
                         continue
                     elif cert_state.status in (CertificateStatus.SELF_SIGNED,
                                                CertificateStatus.NEEDS_RENEWAL,
@@ -836,8 +881,10 @@ class ACMEChief():
                         new_status = self._handle_order_finalized(cert_id, key_type_id)
                     elif cert_state.status is CertificateStatus.CERTIFICATE_STAGED:
                         new_status = self._handle_ready_to_be_pushed(cert_id, key_type_id)
+                        self._fetch_ocsp_response(cert_id, key_type_id)
                     elif cert_state.status is CertificateStatus.READY_TO_BE_PUSHED:
                         new_status = self._push_live_certificate(cert_id)
+                        self._fetch_ocsp_response(cert_id, key_type_id)
                     else:
                         logger.error("Unexpected state: %s", cert_state.status)
                         continue

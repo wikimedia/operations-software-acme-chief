@@ -104,6 +104,12 @@ class OCSPResponse:
         """Returns the datetime of the next OCSP response"""
         return self._response.next_update
 
+    @staticmethod
+    def load(path):
+        """Loads the OCSP response from a DER file on disk"""
+        with open(path, 'rb') as der_file:
+            return OCSPResponse(der_file.read())
+
     def save(self, path):
         """Persists the OCSP response on disk"""
         with open(path, 'wb') as response_file:

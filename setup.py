@@ -6,7 +6,7 @@ with open("README.md", "r") as fh:
 
 install_requires = [
     'acme >= 0.28.0',
-    'cryptography >= 2.3',
+    'cryptography >= 2.4',
     'dnspython >= 1.16.0',
     'flask >= 1.0.2',
     'josepy >= 1.1.0',

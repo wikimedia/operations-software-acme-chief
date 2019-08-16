@@ -111,6 +111,7 @@ class ACMEChiefTest(unittest.TestCase):
                     'challenge': 'http-01',
                     'staging_time': timedelta(seconds=3600),
                     'prevalidate': False,
+                    'ocsp_update_threshold': timedelta(days=2),
                 },
             },
             default_account='1945e767ad72a532ebca519242a801bf',
@@ -213,7 +214,7 @@ class ACMEChiefTest(unittest.TestCase):
                               mock.call().generate(**KEY_TYPES['rsa-2048']['params']),
                               mock.call().save(self.instance._get_path('test_certificate',
                                                                         'rsa-2048',
-                                                                        public=False,
+                                                                        file_type='key',
                                                                         kind='new'))]
         rsa_key_mock.assert_has_calls(expected_key_calls)
         ec_key_mock.assert_not_called()
@@ -229,19 +230,19 @@ class ACMEChiefTest(unittest.TestCase):
                                     mock.call().save(
                                     self.instance._get_path('test_certificate',
                                     'rsa-2048',
-                                    public=True,
+                                    file_type='cert',
                                     kind='new',
                                     cert_type='cert_only'), mode=CertificateSaveMode.CERT_ONLY),
                                     mock.call().save(
                                     self.instance._get_path('test_certificate',
                                     'rsa-2048',
-                                    public=True,
+                                    file_type='cert',
                                     kind='new',
                                     cert_type='chain_only'), mode=CertificateSaveMode.CHAIN_ONLY),
                                     mock.call().save(
                                     self.instance._get_path('test_certificate',
                                     'rsa-2048',
-                                    public=True,
+                                    file_type='cert',
                                     kind='new',
                                     cert_type='full_chain'), mode=CertificateSaveMode.FULL_CHAIN)])
         push_live_mock.assert_called_once_with('test_certificate')
@@ -382,6 +383,109 @@ class ACMEChiefTest(unittest.TestCase):
                 handle_pushed_challenges_mock.assert_any_call('test_certificate', key_type_id)
                 self.assertEqual(cert_status.status, handle_pushed_challenges_mock.return_value)
 
+    @staticmethod
+    def _generate_cert_mock():
+        cert_mock = mock.MagicMock()
+        cert_mock.self_signed = False
+        cert_mock.needs_renew.return_value = False
+        cert_mock.certificate.not_valid_before = datetime.utcnow()
+        cert_mock.certificate.not_valid_after = datetime.utcnow() + timedelta(days=10)
+        cert_mock.common_name = 'acmechieftest.BETA.wmflabs.org'
+        cert_mock.subject_alternative_names = ['acmechieftest.alpha.wmflabs.org',
+                                                'acmechieftest.beta.wmflabs.org']
+        cert_mock.ocsp_uri = 'http://ocsp.endpoint'
+        return cert_mock
+
+    @mock.patch('acme_chief.acme_chief.OCSPResponse')
+    @mock.patch('acme_chief.acme_chief.OCSPRequest')
+    @mock.patch.object(Certificate, 'load')
+    def test_fetch_ocsp_response_dont_exist(self, load_cert_mock, ocsp_request_mock, ocsp_response_mock):
+        ocsp_response_mock.load.side_effect = FileNotFoundError
+        load_cert_mock.return_value = self._generate_cert_mock()
+        load_cert_mock.return_value.chain = [ACMEChiefTest._generate_cert_mock(), ACMEChiefTest._generate_cert_mock()]
+        self.instance._fetch_ocsp_response('test_certificate', 'rsa-2048')
+        load_cert_mock.assert_has_calls([
+            mock.call(self.instance._get_path('test_certificate', 'rsa-2048',
+                                              file_type='cert', kind='live', cert_type='full_chain')),
+            mock.call(self.instance._get_path('test_certificate', 'rsa-2048',
+                                              file_type='cert', kind='new', cert_type='full_chain')),
+        ])
+        ocsp_response_mock.assert_has_calls([
+            mock.call.load(self.instance._get_path('test_certificate', 'rsa-2048', file_type='ocsp', kind='live')),
+            mock.call.load(self.instance._get_path('test_certificate', 'rsa-2048', file_type='ocsp', kind='new')),
+        ])
+        ocsp_request_mock.assert_has_calls([
+            mock.call(load_cert_mock.return_value, load_cert_mock.return_value.chain[1]),
+            mock.call().fetch_response(),
+            mock.call().fetch_response().save(self.instance._get_path('test_certificate', 'rsa-2048', file_type='ocsp',
+                                                                      kind='live')),
+            mock.call(load_cert_mock.return_value, load_cert_mock.return_value.chain[1]),
+            mock.call().fetch_response(),
+            mock.call().fetch_response().save(self.instance._get_path('test_certificate', 'rsa-2048', file_type='ocsp',
+                                                                      kind='new')),
+        ])
+
+    @mock.patch('acme_chief.acme_chief.OCSPResponse')
+    @mock.patch('acme_chief.acme_chief.OCSPRequest')
+    @mock.patch.object(Certificate, 'load')
+    def test_fetch_ocsp_response_doesnt_need_refresh(self, load_cert_mock, ocsp_request_mock, ocsp_response_mock):
+        def _generate_ocsp_response_mock():
+            ocsp_response_mock = mock.MagicMock()
+            ocsp_response_mock.this_update = datetime.utcnow()
+            ocsp_response_mock.next_update = datetime.utcnow() + timedelta(days=7)
+            return ocsp_response_mock
+
+        ocsp_response_mock.load.return_value = _generate_ocsp_response_mock()
+        load_cert_mock.return_value = ACMEChiefTest._generate_cert_mock()
+        load_cert_mock.return_value.chain = [ACMEChiefTest._generate_cert_mock(), ACMEChiefTest._generate_cert_mock()]
+        self.instance._fetch_ocsp_response('test_certificate', 'rsa-2048')
+        load_cert_mock.assert_has_calls([
+            mock.call(self.instance._get_path('test_certificate', 'rsa-2048',
+                                              file_type='cert', kind='live', cert_type='full_chain')),
+            mock.call(self.instance._get_path('test_certificate', 'rsa-2048',
+                                              file_type='cert', kind='new', cert_type='full_chain')),
+        ])
+        ocsp_response_mock.assert_has_calls([
+            mock.call.load(self.instance._get_path('test_certificate', 'rsa-2048', file_type='ocsp', kind='live')),
+            mock.call.load(self.instance._get_path('test_certificate', 'rsa-2048', file_type='ocsp', kind='new')),
+        ])
+        ocsp_request_mock.assert_not_called()
+
+    @mock.patch('acme_chief.acme_chief.OCSPResponse')
+    @mock.patch('acme_chief.acme_chief.OCSPRequest')
+    @mock.patch.object(Certificate, 'load')
+    def test_fetch_ocsp_response_needs_refresh(self, load_cert_mock, ocsp_request_mock, ocsp_response_mock):
+        def _generate_ocsp_response_mock():
+            ocsp_response_mock = mock.MagicMock()
+            ocsp_response_mock.this_update = datetime.utcnow()
+            ocsp_response_mock.next_update = datetime.utcnow() + timedelta(days=1)
+            return ocsp_response_mock
+
+        ocsp_response_mock.load.return_value = _generate_ocsp_response_mock()
+        load_cert_mock.return_value = ACMEChiefTest._generate_cert_mock()
+        load_cert_mock.return_value.chain = [ACMEChiefTest._generate_cert_mock(), ACMEChiefTest._generate_cert_mock()]
+        self.instance._fetch_ocsp_response('test_certificate', 'rsa-2048')
+        load_cert_mock.assert_has_calls([
+            mock.call(self.instance._get_path('test_certificate', 'rsa-2048',
+                                              file_type='cert', kind='live', cert_type='full_chain')),
+            mock.call(self.instance._get_path('test_certificate', 'rsa-2048',
+                                              file_type='cert', kind='new', cert_type='full_chain')),
+        ])
+        ocsp_response_mock.assert_has_calls([
+            mock.call.load(self.instance._get_path('test_certificate', 'rsa-2048', file_type='ocsp', kind='live')),
+            mock.call.load(self.instance._get_path('test_certificate', 'rsa-2048', file_type='ocsp', kind='new')),
+        ])
+        ocsp_request_mock.assert_has_calls([
+            mock.call(load_cert_mock.return_value, load_cert_mock.return_value.chain[1]),
+            mock.call().fetch_response(),
+            mock.call().fetch_response().save(self.instance._get_path('test_certificate', 'rsa-2048', file_type='ocsp',
+                                                                      kind='live')),
+            mock.call(load_cert_mock.return_value, load_cert_mock.return_value.chain[1]),
+            mock.call().fetch_response(),
+            mock.call().fetch_response().save(self.instance._get_path('test_certificate', 'rsa-2048', file_type='ocsp',
+                                                                      kind='new')),
+        ])
+
 
 class ACMEChiefStatusTransitionTests(unittest.TestCase):
     @mock.patch('signal.signal')
@@ -483,7 +587,7 @@ class ACMEChiefStatusTransitionTests(unittest.TestCase):
                               mock.call().generate(**KEY_TYPES['ec-prime256v1']['params']),
                               mock.call().save(self.instance._get_path('test_certificate',
                                                                        'ec-prime256v1',
-                                                                       public=False,
+                                                                       file_type='key',
                                                                        kind='new'))]
         self.ec_key_mock.assert_has_calls(expected_key_calls)
         get_acme_session_mock.assert_called_once()
@@ -520,7 +624,7 @@ class ACMEChiefStatusTransitionTests(unittest.TestCase):
                               mock.call().generate(**KEY_TYPES['ec-prime256v1']['params']),
                               mock.call().save(self.instance._get_path('test_certificate_dns01',
                                                                        'ec-prime256v1',
-                                                                       public=False,
+                                                                       file_type='key',
                                                                        kind='new'))]
         self.ec_key_mock.assert_has_calls(expected_key_calls)
         get_acme_session_mock.assert_called_once()
@@ -552,7 +656,7 @@ class ACMEChiefStatusTransitionTests(unittest.TestCase):
                               mock.call().generate(**KEY_TYPES['ec-prime256v1']['params']),
                               mock.call().save(self.instance._get_path('test_certificate_dns01',
                                                                        'ec-prime256v1',
-                                                                       public=False,
+                                                                       file_type='key',
                                                                        kind='new'))]
         self.ec_key_mock.assert_has_calls(expected_key_calls)
         get_acme_session_mock.assert_called_once()
@@ -633,7 +737,7 @@ class ACMEChiefStatusTransitionTests(unittest.TestCase):
         self.assertEqual(status, CertificateStatus.VALID)
 
         pkey_loader_calls = [mock.call(self.instance._get_path('test_certificate', 'rsa-2048',
-                                                               public=False, kind='new'))]
+                                                               file_type='key', kind='new'))]
         pkey_loader_mock.assert_has_calls(pkey_loader_calls)
 
         csr_expected_calls = [mock.call.generate_csr_id(common_name='acmechieftest.beta.wmflabs.org',
@@ -664,7 +768,7 @@ class ACMEChiefStatusTransitionTests(unittest.TestCase):
         status = self.instance._handle_validated_challenges('test_certificate', 'rsa-2048')
         self.assertEqual(status, CertificateStatus.VALID)
         pkey_loader_calls = [mock.call(self.instance._get_path('test_certificate',
-                                                               'rsa-2048', public=False, kind='new'))]
+                                                               'rsa-2048', file_type='key', kind='new'))]
         pkey_loader_mock.assert_has_calls(pkey_loader_calls)
         csr_expected_calls = [mock.call.generate_csr_id(common_name='acmechieftest.beta.wmflabs.org',
                                                         public_key_pem=pkey_loader_mock.return_value.public_pem,
@@ -688,7 +792,7 @@ class ACMEChiefStatusTransitionTests(unittest.TestCase):
         status = self.instance._handle_validated_challenges('test_certificate', 'rsa-2048')
         self.assertEqual(status, CertificateStatus.CHALLENGES_PUSHED)
         pkey_loader_calls = [mock.call(self.instance._get_path('test_certificate', 'rsa-2048',
-                                                               public=False, kind='new'))]
+                                                               file_type='key', kind='new'))]
         pkey_loader_mock.assert_has_calls(pkey_loader_calls)
         csr_expected_calls = [mock.call.generate_csr_id(common_name='acmechieftest.beta.wmflabs.org',
                                                         public_key_pem=pkey_loader_mock.return_value.public_pem,
@@ -716,7 +820,7 @@ class ACMEChiefStatusTransitionTests(unittest.TestCase):
         status = self.instance._handle_pushed_challenges('test_certificate', 'rsa-2048')
         self.assertEqual(status, CertificateStatus.CHALLENGES_PUSHED)
         pkey_loader_calls = [mock.call(self.instance._get_path('test_certificate', 'rsa-2048',
-                                                               public=False, kind='new'))]
+                                                               file_type='key', kind='new'))]
         pkey_loader_mock.assert_has_calls(pkey_loader_calls)
         get_acme_session_mock.assert_called_once()
         acme_session_calls = [mock.call(self.instance.config.certificates['test_certificate']),
@@ -731,7 +835,7 @@ class ACMEChiefStatusTransitionTests(unittest.TestCase):
         status = self.instance._handle_pushed_challenges('test_certificate', 'rsa-2048')
         self.assertEqual(status, CertificateStatus.CHALLENGES_REJECTED)
         pkey_loader_calls = [mock.call(self.instance._get_path('test_certificate', 'rsa-2048',
-                                                               public=False, kind='new'))]
+                                                               file_type='key', kind='new'))]
         pkey_loader_mock.assert_has_calls(pkey_loader_calls)
         get_acme_session_mock.assert_called_once()
         acme_session_calls = [mock.call(self.instance.config.certificates['test_certificate']),
@@ -747,7 +851,7 @@ class ACMEChiefStatusTransitionTests(unittest.TestCase):
         status = self.instance._handle_pushed_challenges('test_certificate', 'rsa-2048')
         self.assertEqual(status, CertificateStatus.VALID)
         pkey_loader_calls = [mock.call(self.instance._get_path('test_certificate', 'rsa-2048',
-                                                               public=False, kind='new'))]
+                                                               file_type='key', kind='new'))]
         pkey_loader_mock.assert_has_calls(pkey_loader_calls)
         get_acme_session_mock.assert_called_once()
         acme_session_calls = [mock.call(self.instance.config.certificates['test_certificate']),
@@ -763,7 +867,7 @@ class ACMEChiefStatusTransitionTests(unittest.TestCase):
         status = self.instance._handle_order_finalized('test_certificate', 'rsa-2048')
         self.assertEqual(status, CertificateStatus.CERTIFICATE_ISSUED)
         pkey_loader_calls = [mock.call(self.instance._get_path('test_certificate', 'rsa-2048',
-                                                               public=False, kind='new'))]
+                                                               file_type='key', kind='new'))]
         pkey_loader_mock.assert_has_calls(pkey_loader_calls)
         get_acme_session_mock.assert_called_once()
         acme_session_calls = [mock.call(self.instance.config.certificates['test_certificate']),
@@ -779,23 +883,23 @@ class ACMEChiefStatusTransitionTests(unittest.TestCase):
         status = self.instance._handle_order_finalized('test_certificate', 'rsa-2048')
         self.assertEqual(status, CertificateStatus.VALID)
         pkey_loader_calls = [mock.call(self.instance._get_path('test_certificate', 'rsa-2048',
-                                                               public=False, kind='new'))]
+                                                               file_type='key', kind='new'))]
         pkey_loader_mock.assert_has_calls(pkey_loader_calls)
         get_acme_session_mock.assert_called_once()
         acme_session_calls = [mock.call(self.instance.config.certificates['test_certificate']),
                               mock.call().get_certificate(csr_mock.generate_csr_id.return_value),
                               mock.call().get_certificate().save(self.instance._get_path('test_certificate',
-                                                                                         'rsa-2048', public=True,
+                                                                                         'rsa-2048', file_type='cert',
                                                                                          kind='new',
                                                                                          cert_type='cert_only'),
                                                                  mode=CertificateSaveMode.CERT_ONLY),
                               mock.call().get_certificate().save(self.instance._get_path('test_certificate',
-                                                                                         'rsa-2048', public=True,
+                                                                                         'rsa-2048', file_type='cert',
                                                                                          kind='new',
                                                                                          cert_type='chain_only'),
                                                                  mode=CertificateSaveMode.CHAIN_ONLY),
                               mock.call().get_certificate().save(self.instance._get_path('test_certificate',
-                                                                                         'rsa-2048', public=True,
+                                                                                         'rsa-2048', file_type='cert',
                                                                                          kind='new',
                                                                                          cert_type='full_chain'),
                                                                  mode=CertificateSaveMode.FULL_CHAIN)
@@ -894,9 +998,9 @@ class ACMEChiefDetermineStatusTest(unittest.TestCase):
 
             status = self.instance._set_cert_status()
             load_calls = [mock.call(self.instance._get_path('test_certificate', 'ec-prime256v1',
-                                                            public=True, kind='live')),
+                                                            file_type='cert', kind='live')),
                           mock.call(self.instance._get_path('test_certificate', 'rsa-2048',
-                                                            public=True, kind='live')),
+                                                            file_type='cert', kind='live')),
                          ]
             load_mock.assert_has_calls(load_calls, any_order=True)
             self.assertEqual(len(status), len(self.instance.config.certificates))
@@ -913,13 +1017,13 @@ class ACMEChiefDetermineStatusTest(unittest.TestCase):
                                  self._configure_load_return_value(CertificateStatus.CERTIFICATE_STAGED)]
         status = self.instance._set_cert_status()
         load_calls = [mock.call(self.instance._get_path('test_certificate', 'ec-prime256v1',
-                                                        public=True, kind='live')),
+                                                        file_type='cert', kind='live')),
                       mock.call(self.instance._get_path('test_certificate', 'ec-prime256v1',
-                                                        public=True, kind='new', cert_type='full_chain')),
+                                                        file_type='cert', kind='new', cert_type='full_chain')),
                       mock.call(self.instance._get_path('test_certificate', 'rsa-2048',
-                                                        public=True, kind='live')),
+                                                        file_type='cert', kind='live')),
                       mock.call(self.instance._get_path('test_certificate', 'rsa-2048',
-                                                        public=True, kind='new', cert_type='full_chain')),
+                                                        file_type='cert', kind='new', cert_type='full_chain')),
                      ]
         load_mock.assert_has_calls(load_calls, any_order=True)
         self.assertEqual(len(status), len(self.instance.config.certificates))
@@ -956,9 +1060,9 @@ class ACMEChiefDetermineStatusTest(unittest.TestCase):
 
             status = self.instance._set_cert_status()
             load_calls = [mock.call(self.instance._get_path('test_certificate', 'ec-prime256v1',
-                                                    public=True, kind='live')),
+                                                            file_type='cert', kind='live')),
                         mock.call(self.instance._get_path('test_certificate', 'rsa-2048',
-                                                    public=True, kind='live')),
+                                                          file_type='cert', kind='live')),
                         ]
             load_mock.assert_has_calls(load_calls, any_order=True)
             self.assertEqual(len(status), len(self.instance.config.certificates))
@@ -995,9 +1099,9 @@ class ACMEChiefDetermineStatusTest(unittest.TestCase):
 
             status = self.instance._set_cert_status()
             load_calls = [mock.call(self.instance._get_path('test_certificate', 'ec-prime256v1',
-                                                    public=True, kind='live')),
+                                                            file_type='cert', kind='live')),
                         mock.call(self.instance._get_path('test_certificate', 'rsa-2048',
-                                                    public=True, kind='live')),
+                                                          file_type='cert', kind='live')),
                         ]
             load_mock.assert_has_calls(load_calls, any_order=True)
             self.assertEqual(len(status), len(self.instance.config.certificates))
@@ -1103,7 +1207,8 @@ class ACMEChiefIntegrationTest(BasePebbleIntegrationTest):
                     with self.subTest(challenge=challenge, step=3):
                         self.assertEqual(acme_chief.cert_status[cert_id][key_type_id].status,
                                          CertificateStatus.SELF_SIGNED)
-                        cert = Certificate.load(acme_chief._get_path(cert_id, key_type_id, public=True, kind='live'))
+                        cert = Certificate.load(acme_chief._get_path(cert_id, key_type_id,
+                                                                     file_type='cert', kind='live'))
                         self.assertTrue(cert.self_signed)
 
             # Step 4 - Request new certificates
@@ -1115,7 +1220,7 @@ class ACMEChiefIntegrationTest(BasePebbleIntegrationTest):
 
             for cert_id in acme_chief.cert_status:
                 for key_type_id in KEY_TYPES:
-                    cert = Certificate.load(acme_chief._get_path(cert_id, key_type_id, public=True, kind='live'))
+                    cert = Certificate.load(acme_chief._get_path(cert_id, key_type_id, file_type='cert', kind='live'))
                     with self.subTest(challenge=challenge, step=4):
                         self.assertFalse(cert.self_signed)
 
@@ -1123,7 +1228,7 @@ class ACMEChiefIntegrationTest(BasePebbleIntegrationTest):
                 for key_type_id in KEY_TYPES:
                     for symlink_type in ('live', 'new'):
                         with self.subTest(challenge=challenge, step=4, symlink_type=symlink_type):
-                            cert_path = acme_chief._get_path(cert_id, key_type_id, public=True, kind=symlink_type)
+                            cert_path = acme_chief._get_path(cert_id, key_type_id, file_type='cert', kind=symlink_type)
                             link_target = os.readlink(os.path.dirname(cert_path))
                             self.assertNotEqual(link_target, os.path.abspath(link_target),
                                                 "We got an absolute symlink instead of the expected relative one")
@@ -1175,7 +1280,7 @@ class ACMEChiefIntegrationTest(BasePebbleIntegrationTest):
         for cert_id in acme_chief.cert_status:
             for key_type_id in KEY_TYPES:
                 self.assertEqual(acme_chief.cert_status[cert_id][key_type_id].status, CertificateStatus.SELF_SIGNED)
-                cert = Certificate.load(acme_chief._get_path(cert_id, key_type_id, public=True, kind='live'))
+                cert = Certificate.load(acme_chief._get_path(cert_id, key_type_id, file_type='cert', kind='live'))
                 self.assertTrue(cert.self_signed)
 
         for challenge_type in (ACMEChallengeType.HTTP01, ACMEChallengeType.DNS01):
@@ -1205,7 +1310,8 @@ class ACMEChiefIntegrationTest(BasePebbleIntegrationTest):
 
                 for cert_id in acme_chief.cert_status:
                     for key_type_id in KEY_TYPES:
-                        cert = Certificate.load(acme_chief._get_path(cert_id, key_type_id, public=True, kind='live'))
+                        cert = Certificate.load(acme_chief._get_path(cert_id, key_type_id,
+                                                                     file_type='cert', kind='live'))
                         self.assertFalse(cert.self_signed)
 
     @mock.patch('acme_chief.acme_requests.TLS_VERIFY', False)
@@ -1255,7 +1361,7 @@ class ACMEChiefIntegrationTest(BasePebbleIntegrationTest):
         for cert_id in acme_chief.cert_status:
             for key_type_id in KEY_TYPES:
                 self.assertEqual(acme_chief.cert_status[cert_id][key_type_id].status, CertificateStatus.SELF_SIGNED)
-                cert = Certificate.load(acme_chief._get_path(cert_id, key_type_id, public=True, kind='live'))
+                cert = Certificate.load(acme_chief._get_path(cert_id, key_type_id, file_type='cert', kind='live'))
                 self.assertTrue(cert.self_signed)
 
         # Step 4 - Request new certificates mocking ACMEChief._handle_validated_challenges() method
@@ -1343,20 +1449,17 @@ class ACMEChiefIntegrationTest(BasePebbleIntegrationTest):
         acme_chief.create_initial_certs()
 
         # Step 4 - run two iterations of certificate management
-        print("======= Running Step 4 ========")
         for _ in range(2):
             with self.assertRaises(InfiniteLoopBreaker):
                 acme_chief.certificate_management()
         for cert_id in acme_chief.cert_status:
             for key_type_id in KEY_TYPES:
-                print("===== trying to load {}/{} =====".format(cert_id, key_type_id))
                 self.assertEqual(acme_chief.cert_status[cert_id][key_type_id].status, CertificateStatus.VALID)
-                cert = Certificate.load(acme_chief._get_path(cert_id, key_type_id, public=True, kind='live'))
+                cert = Certificate.load(acme_chief._get_path(cert_id, key_type_id, file_type='cert', kind='live'))
                 self.assertEqual(cert.subject_alternative_names, ['acmechieftest.beta.wmflabs.org'])
                 self.assertFalse(cert.self_signed)
 
         # Step 5 - Add a new SNI
-        print("======= Running Step 5 ========")
         acme_chief.config.certificates['test_certificate']['SNI'].append('acmechieftest.alpha.wmflabs.org')
         acme_chief.config.certificates['test_certificate_staged']['SNI'].append('acmechieftest.alpha.wmflabs.org')
 
@@ -1374,11 +1477,11 @@ class ACMEChiefIntegrationTest(BasePebbleIntegrationTest):
 
         for cert_id in acme_chief.cert_status:
             for key_type_id in KEY_TYPES:
-                cert = Certificate.load(acme_chief._get_path(cert_id, key_type_id, public=True, kind='live'))
+                cert = Certificate.load(acme_chief._get_path(cert_id, key_type_id, file_type='cert', kind='live'))
                 if cert_id == 'test_certificate':
                     self.assertEqual(acme_chief.cert_status[cert_id][key_type_id].status, CertificateStatus.VALID)
                     self.assertEqual(cert.subject_alternative_names, ['acmechieftest.beta.wmflabs.org',
-                                                                        'acmechieftest.alpha.wmflabs.org'])
+                                                                      'acmechieftest.alpha.wmflabs.org'])
                 elif cert_id == 'test_certificate_staged':
                     self.assertEqual(acme_chief.cert_status[cert_id][key_type_id].status,
                                      CertificateStatus.CERTIFICATE_STAGED)

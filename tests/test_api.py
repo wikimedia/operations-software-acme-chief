@@ -82,7 +82,7 @@ class ACMEChiefApiTest(unittest.TestCase):
     @staticmethod
     def _get_valid_parts():
         for key_type in KEY_TYPES:
-            for file_name in ['{}.crt', '{}.chain.crt', '{}.chained.crt', '{}.key']:
+            for file_name in ['{}.crt', '{}.chain.crt', '{}.chained.crt', '{}.key', '{}.ocsp']:
                 yield file_name.format(key_type)
 
     def _populate_files(self):

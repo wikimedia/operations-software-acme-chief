@@ -1,3 +1,13 @@
+acme-chief (0.21-1) buster-wikimedia; urgency=medium
+
+  x509: Expose the OCSP URI of a Certificate as a property
+  ocsp: Provide basic functionality to perform OCSP requests
+  ocsp: Allow to load an existing OCSPResponse from disk
+  ocsp: Provide basic test coverage
+  acme_chief: Provide OCSP responses
+
+ -- Valentin Gutierrez <vgutierrez@wikimedia.org>  Thu, 12 Sep 2019 07:14:11 +0000
+
 acme-chief (0.20-1) buster-wikimedia; urgency=medium
 
   acme_chief: Save the certificate using the 3 save modes on issuance time

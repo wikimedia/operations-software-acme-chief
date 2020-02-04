@@ -55,6 +55,7 @@ challenges:
         - 127.0.0.1
         sync_dns_servers:
         - 127.0.0.1
+        resolver_port: 53
         zone_update_cmd: /bin/echo
         zone_update_cmd_timeout: 60.0
         issuing_ca: 'letsencrypt.org'

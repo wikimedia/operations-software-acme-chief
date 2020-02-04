@@ -1,3 +1,10 @@
+acme-chief (0.22-1) buster-wikimedia; urgency=medium
+
+  dns-01: Support custom DNS server port
+  acme_chief: Fix newly reported pylint R1724 (no-else-continue)
+
+ -- Valentin Gutierrez <vgutierrez@wikimedia.org>  Tue, 04 Feb 2020 12:44:37 +0000
+
 acme-chief (0.21-1) buster-wikimedia; urgency=medium
 
   x509: Expose the OCSP URI of a Certificate as a property

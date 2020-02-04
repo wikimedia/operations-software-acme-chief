@@ -864,14 +864,14 @@ class ACMEChief():
                     if cert_state.status is CertificateStatus.VALID:
                         self._fetch_ocsp_response(cert_id, key_type_id)
                         continue
-                    elif cert_state.status in (CertificateStatus.SELF_SIGNED,
-                                               CertificateStatus.NEEDS_RENEWAL,
-                                               CertificateStatus.EXPIRED,
-                                               CertificateStatus.SUBJECTS_CHANGED,
-                                               CertificateStatus.CHALLENGES_REJECTED,
-                                               CertificateStatus.CERTIFICATE_ISSUED,
-                                               CertificateStatus.ACMECHIEF_ERROR,
-                                               CertificateStatus.ACMEDIR_ERROR):
+                    if cert_state.status in (CertificateStatus.SELF_SIGNED,
+                                             CertificateStatus.NEEDS_RENEWAL,
+                                             CertificateStatus.EXPIRED,
+                                             CertificateStatus.SUBJECTS_CHANGED,
+                                             CertificateStatus.CHALLENGES_REJECTED,
+                                             CertificateStatus.CERTIFICATE_ISSUED,
+                                             CertificateStatus.ACMECHIEF_ERROR,
+                                             CertificateStatus.ACMEDIR_ERROR):
                         new_status = self._new_certificate(cert_id, key_type_id)
                     elif cert_state.status is CertificateStatus.CSR_PUSHED:
                         new_status = self._handle_pushed_csr(cert_id, key_type_id)

@@ -1,7 +1,7 @@
 import mock
 import unittest
 
-from acme_chief.dns import DEFAULT_DNS_TIMEOUT, DNSNoAnswerError, DNS_PORT, Resolver
+from acme_chief.dns import DEFAULT_DNS_PORT, DEFAULT_DNS_TIMEOUT, DNSNoAnswerError, Resolver
 
 class ResolverTest(unittest.TestCase):
     @mock.patch('dns.resolver.Resolver')
@@ -39,12 +39,12 @@ class ResolverTest(unittest.TestCase):
                 answer_mock = mock.MagicMock()
                 answer_mock.rrset = rrset_mocks
                 resolver_mock.return_value.query.return_value = answer_mock
-                resolver = Resolver(nameservers=['127.0.0.1'], timeout=DEFAULT_DNS_TIMEOUT)
+                resolver = Resolver(nameservers=['127.0.0.1'], timeout=DEFAULT_DNS_TIMEOUT, port=DEFAULT_DNS_PORT)
                 query_method = getattr(resolver, test_case['query_method'])
                 records = query_method('_acme-challenge.tests.wmflab.org')
                 self.assertEqual(records, test_case['records'])
                 resolver_instance = resolver_mock.return_value
-                self.assertEqual(resolver_instance.port, DNS_PORT)
+                self.assertEqual(resolver_instance.port, DEFAULT_DNS_PORT)
                 self.assertEqual(resolver_instance.timeout, DEFAULT_DNS_TIMEOUT)
                 self.assertEqual(resolver_instance.lifetime, DEFAULT_DNS_TIMEOUT)
                 self.assertEqual(resolver_instance.nameservers, ['127.0.0.1'])

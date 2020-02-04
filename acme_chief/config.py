@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)  # pylint: disable=invalid-name
 # default values that can be customized via the config file. Check the README for a valid example
 DEFAULT_DNS_ZONE_UPDATE_CMD = '/bin/echo'
 DEFAULT_DNS_ZONE_UPDATE_CMD_TIMEOUT = 60.0
+DEFAULT_DNS_RESOLVER_PORT = 53
 
 DEFAULT_CERTIFICATE_STAGING_TIME = 3600
 DEFAULT_OCSP_RESPONSE_UPDATE_THRESHOLD = 172800
@@ -53,6 +54,13 @@ class ACMEChiefConfig:
                     logger.warning("Missing/invalid DNS zone updater CMD timeout, using the default one: %.2f",
                                    DEFAULT_DNS_ZONE_UPDATE_CMD_TIMEOUT)
                     challenge_config['zone_update_cmd_timeout'] = DEFAULT_DNS_ZONE_UPDATE_CMD_TIMEOUT
+
+                try:
+                    challenge_config['resolver_port'] = int(challenge_config['resolver_port'])
+                except (KeyError, ValueError):
+                    logger.warning("Missing/invalid DNS port, using the default one: %i",
+                                   DEFAULT_DNS_RESOLVER_PORT)
+                    challenge_config['resolver_port'] = DEFAULT_DNS_RESOLVER_PORT
 
                 self.challenges[ACMEChallengeType.DNS01] = challenge_config
             elif challenge_type == 'http-01':

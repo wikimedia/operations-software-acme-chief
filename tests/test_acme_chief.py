@@ -1140,11 +1140,10 @@ class ACMEChiefIntegrationTest(BasePebbleIntegrationTest):
         BaseDNSRequestHandler.challenges_path = os.path.join(certificates_path, ACMEChief.dns_challenges_path)
         proxy_host, proxy_port = self.proxy_server.server_address
         proxy_url = 'http://{}:{}'.format(proxy_host, proxy_port)
-        dns_host, dns_port = self.dns_server.server_address
+        dns_host, self.dns_port = self.dns_server.server_address
         self.patchers = [
             mock.patch.dict('acme_chief.acme_requests.HTTP_VALIDATOR_PROXIES', {'http': proxy_url}),
             mock.patch('acme_chief.acme_requests.DNS_SERVERS', [dns_host]),
-            mock.patch('acme_chief.dns.DNS_PORT', dns_port),
         ]
         for patcher in self.patchers:
             patcher.start()
@@ -1189,6 +1188,7 @@ class ACMEChiefIntegrationTest(BasePebbleIntegrationTest):
                     'dns-01': {
                         'validation_dns_servers': ['127.0.0.1'],
                         'sync_dns_servers': ['127.0.0.1'],
+                        'resolver_port': self.dns_port,
                     }
                 },
                 api={
@@ -1264,6 +1264,7 @@ class ACMEChiefIntegrationTest(BasePebbleIntegrationTest):
                 'dns-01': {
                     'validation_dns_servers': ['127.0.0.1'],
                     'sync_dns_servers': ['127.0.0.1'],
+                    'resolver_port': self.dns_port,
                 }
             },
             api={

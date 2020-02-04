@@ -130,6 +130,7 @@ class DNS01ACMEChallenge(BaseACMEChallenge):
     def validate(self, **kwargs):
         logger.debug("Attempting to validate challenge %s", self)
         dns_servers = kwargs.get('dns_servers', DNS_SERVERS)
+        dns_port = kwargs['dns_port']
         timeout = kwargs.get('timeout', DEFAULT_DNS01_VALIDATION_TIMEOUT)
         ips_nameservers = [None]
         if dns_servers is not None:
@@ -143,7 +144,7 @@ class DNS01ACMEChallenge(BaseACMEChallenge):
 
         for ip_nameserver in ips_nameservers:
             try:
-                resolver = Resolver(nameservers=(ip_nameserver,), timeout=timeout)
+                resolver = Resolver(nameservers=(ip_nameserver,), timeout=timeout, port=dns_port)
                 txt_records = resolver.txt_query(self.validation_domain_name)
                 for txt_record in txt_records:
                     if txt_record == self.validation:

@@ -9,7 +9,7 @@ from dns import resolver
 from dns.exception import Timeout
 
 DEFAULT_DNS_TIMEOUT = 2
-DNS_PORT = 53  # intended to be used during testing
+DEFAULT_DNS_PORT = 53
 
 
 class DNSError(Exception):
@@ -27,11 +27,11 @@ class DNSNoAnswerError(DNSError):
 class Resolver:
     """Small DNS Resolver class that makes sure that sane options like timeouts and the proper DNS servers
        are being used"""
-    def __init__(self, nameservers=None, timeout=DEFAULT_DNS_TIMEOUT):
+    def __init__(self, nameservers=None, timeout=DEFAULT_DNS_TIMEOUT, port=DEFAULT_DNS_PORT):
         self._resolver = resolver.Resolver()
         self._resolver.timeout = timeout
         self._resolver.lifetime = timeout
-        self._resolver.port = DNS_PORT
+        self._resolver.port = port
         if nameservers is not None:
             try:
                 self._resolver.nameservers = self.resolve_dns_servers(nameservers)

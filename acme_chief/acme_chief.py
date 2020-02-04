@@ -584,7 +584,9 @@ class ACMEChief():
         for challenge in challenges:
             if challenge.challenge_type is ACMEChallengeType.DNS01:
                 validation_params = {'dns_servers':
-                                     self.config.challenges[ACMEChallengeType.DNS01]['validation_dns_servers']}
+                                     self.config.challenges[ACMEChallengeType.DNS01]['validation_dns_servers'],
+                                     'dns_port':
+                                     self.config.challenges[ACMEChallengeType.DNS01]['resolver_port']}
             else:
                 validation_params = {}
 

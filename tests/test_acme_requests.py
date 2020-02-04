@@ -24,6 +24,8 @@ from tests.test_pebble import BasePebbleIntegrationTest
 
 DIRECTORY_URL = 'https://127.0.0.1:14000/dir'
 
+DNS_PORT = 5353
+
 
 class ACMEAccountTest(unittest.TestCase):
     def test_basic_init(self):
@@ -111,12 +113,13 @@ class ACMEChallengeTest(unittest.TestCase):
                         resolver_instance_mock.txt_query.return_value = ['foo']
 
                     resolver_mock.resolve_dns_servers.return_value = dns_servers
-                    result = challenge.validate(dns_servers=dns_servers)
+                    result = challenge.validate(dns_servers=dns_servers, dns_port=DNS_PORT)
                     self.assertEqual(len(dns_servers), len(resolver_instance_mock.txt_query.mock_calls))
                     resolver_mock_calls = []
                     txt_query_calls = []
                     for dns_server in dns_servers:
                         resolver_mock_calls.append(mock.call(nameservers=(dns_server,),
+                                                             port=DNS_PORT,
                                                              timeout=DEFAULT_DNS01_VALIDATION_TIMEOUT))
                         txt_query_calls.append(mock.call(challenge.validation_domain_name))
                     resolver_mock.assert_has_calls(resolver_mock_calls, any_order=True)
@@ -159,7 +162,7 @@ class ACMEChallengeTest(unittest.TestCase):
         for test_case in test_cases:
             query_mock.reset()
             query_mock.side_effect = test_case['side_effect']
-            result = challenge.validate()
+            result = challenge.validate(dns_port=DNS_PORT)
             self.assertEqual(result, test_case['result'], test_case['name'])
 
 

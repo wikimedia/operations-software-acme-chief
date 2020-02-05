@@ -1,3 +1,9 @@
+acme-chief (0.24-1) buster-wikimedia; urgency=medium
+
+  requests: Fix content-type on fetch_certificate
+
+ -- Valentin Gutierrez <vgutierrez@wikimedia.org>  Wed, 05 Feb 2020 14:20:45 +0000
+
 acme-chief (0.23-1) buster-wikimedia; urgency=medium
 
   requests: Use POST-as-GET to fetch the issued certificate

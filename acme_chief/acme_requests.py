@@ -224,13 +224,13 @@ class ACMEClient(client.ClientV2):
         """Attempts to fetch the certificate on an already finalized order"""
         while datetime.now() < deadline:
             time.sleep(1)
-            response = self.net.get(orderr.uri)
+            response = self._post_as_get(orderr.uri)
             body = messages.Order.from_json(response.json())
             if body.error is not None:
                 raise errors.IssuanceError(body.error)
             if body.certificate is not None:
-                certificate_response = self.net.get(body.certificate,
-                                                    content_type=client.DER_CONTENT_TYPE).text
+                certificate_response = self._post_as_get(body.certificate,
+                                                         content_type=client.DER_CONTENT_TYPE).text
                 return orderr.update(body=body, fullchain_pem=certificate_response)
         raise errors.TimeoutError()
 

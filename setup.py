@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
     long_description = fh.read()
 
 install_requires = [
-    'acme >= 0.28.0',
+    'acme >= 0.29.0',
     'cryptography >= 2.4',
     'dnspython >= 1.16.0',
     'flask >= 1.0.2',

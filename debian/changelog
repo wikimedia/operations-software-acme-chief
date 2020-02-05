@@ -1,3 +1,9 @@
+acme-chief (0.23-1) buster-wikimedia; urgency=medium
+
+  requests: Use POST-as-GET to fetch the issued certificate
+
+ -- Valentin Gutierrez <vgutierrez@wikimedia.org>  Wed, 05 Feb 2020 13:03:04 +0000
+
 acme-chief (0.22-1) buster-wikimedia; urgency=medium
 
   dns-01: Support custom DNS server port

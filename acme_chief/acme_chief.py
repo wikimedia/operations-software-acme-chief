@@ -45,7 +45,7 @@ from acme_chief.acme_requests import (ACMEAccount,
                                       ACMETimeoutFetchingCertificateError,
                                       DNS01ACMEValidator, HTTP01ACMEValidator)
 from acme_chief.config import ACMEChiefConfig
-from acme_chief.ocsp import OCSPRequest, OCSPResponse, OCSPResponseError
+from acme_chief.ocsp import OCSPRequest, OCSPRequestError, OCSPResponse, OCSPResponseError
 from acme_chief.x509 import (Certificate, CertificateSaveMode,
                              CertificateSigningRequest, ECPrivateKey,
                              PrivateKeyLoader, RSAPrivateKey,
@@ -842,12 +842,11 @@ class ACMEChief():
             try:
                 ocsp_response = ocsp_request.fetch_response()
                 ocsp_response.save(ocsp_response_path)
-            except OCSPResponseError:
+                logger.info("%s OCSP response refreshed successfully for %s / %s", kind, cert_id, key_type_id)
+            except (OCSPRequestError, OCSPResponseError):
                 logger.exception("Unable to fetch %s OCSP response for %s / %s", kind, cert_id, key_type_id)
             except OSError:
                 logger.exception("Unable to persist %s OCSP response for %s / %s on disk", kind, cert_id, key_type_id)
-
-            logger.info("%s OCSP response refreshed successfully for %s / %s", kind, cert_id, key_type_id)
 
     def certificate_management(self):
         """

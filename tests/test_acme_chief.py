@@ -21,6 +21,7 @@ from acme_chief.acme_requests import (ACMEAccount,
                                       DNS01ACMEChallenge)
 from acme_chief.config import (DEFAULT_DNS_ZONE_UPDATE_CMD,
                                DEFAULT_DNS_ZONE_UPDATE_CMD_TIMEOUT)
+from acme_chief.ocsp import OCSPRequestError
 from acme_chief.x509 import (Certificate, CertificateSaveMode, ECPrivateKey,
                              PrivateKeyLoader, X509Error)
 from cryptography.hazmat.primitives.asymmetric import ec
@@ -484,6 +485,38 @@ class ACMEChiefTest(unittest.TestCase):
             mock.call().fetch_response(),
             mock.call().fetch_response().save(self.instance._get_path('test_certificate', 'rsa-2048', file_type='ocsp',
                                                                       kind='new')),
+        ])
+
+    @mock.patch('acme_chief.acme_chief.OCSPResponse')
+    @mock.patch('acme_chief.acme_chief.OCSPRequest')
+    @mock.patch.object(Certificate, 'load')
+    def test_fetch_ocsp_response_fetch_error(self, load_cert_mock, ocsp_request_mock, ocsp_response_mock):
+        def _generate_ocsp_response_mock():
+            ocsp_response_mock = mock.MagicMock()
+            ocsp_response_mock.this_update = datetime.utcnow()
+            ocsp_response_mock.next_update = datetime.utcnow() + timedelta(days=1)
+            return ocsp_response_mock
+
+        ocsp_response_mock.load.return_value = _generate_ocsp_response_mock()
+        ocsp_request_mock.return_value.fetch_response.side_effect = OCSPRequestError
+        load_cert_mock.return_value = ACMEChiefTest._generate_cert_mock()
+        load_cert_mock.return_value.chain = [ACMEChiefTest._generate_cert_mock(), ACMEChiefTest._generate_cert_mock()]
+        self.instance._fetch_ocsp_response('test_certificate', 'rsa-2048')
+        load_cert_mock.assert_has_calls([
+            mock.call(self.instance._get_path('test_certificate', 'rsa-2048',
+                                              file_type='cert', kind='live', cert_type='full_chain')),
+            mock.call(self.instance._get_path('test_certificate', 'rsa-2048',
+                                              file_type='cert', kind='new', cert_type='full_chain')),
+        ])
+        ocsp_response_mock.assert_has_calls([
+            mock.call.load(self.instance._get_path('test_certificate', 'rsa-2048', file_type='ocsp', kind='live')),
+            mock.call.load(self.instance._get_path('test_certificate', 'rsa-2048', file_type='ocsp', kind='new')),
+        ])
+        ocsp_request_mock.assert_has_calls([
+            mock.call(load_cert_mock.return_value, load_cert_mock.return_value.chain[1]),
+            mock.call().fetch_response(),
+            mock.call(load_cert_mock.return_value, load_cert_mock.return_value.chain[1]),
+            mock.call().fetch_response(),
         ])
 
 

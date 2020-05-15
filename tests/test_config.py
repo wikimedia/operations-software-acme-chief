@@ -2,8 +2,8 @@ import os
 import tempfile
 import unittest
 from datetime import timedelta
+from unittest import mock
 
-import mock
 from acme_chief.acme_chief import ACMEChief
 from acme_chief.acme_requests import ACMEChallengeType
 from acme_chief.config import ACMEChiefConfig
@@ -135,6 +135,7 @@ class ACMEChiefConfigTest(unittest.TestCase):
         self.assertEqual(config.challenges[ACMEChallengeType.DNS01]['ns_records'], ['ns0.wikimedia.org.',
                                                                                     'ns1.wikimedia.org.',
                                                                                     'ns2.wikimedia.org.'])
+        self.assertEqual(config.challenges[ACMEChallengeType.DNS01]['resolver_port'], 53)
         self.assertEqual(config.api['clients_root_directory'], '/etc/custom-root-directory')
 
     def test_config_without_explicit_default(self):

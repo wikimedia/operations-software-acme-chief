@@ -3,9 +3,9 @@ import itertools
 import os
 import tempfile
 import unittest
+from unittest import mock
 
 import dns
-import mock
 import requests_mock
 from cryptography import x509 as crypto_x509
 from cryptography.x509.oid import ExtensionOID, NameOID

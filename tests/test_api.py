@@ -1,9 +1,9 @@
-import mock
 import os
 import re
 import signal
 import tempfile
 import unittest
+from unittest import mock
 
 import yaml
 

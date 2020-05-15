@@ -6,8 +6,8 @@ import tempfile
 import unittest
 from copy import deepcopy
 from datetime import datetime, timedelta
+from unittest import mock
 
-import mock
 from acme_chief.acme_chief import (CERTIFICATE_TYPES, CHALLENGE_TYPES,
                                    KEY_TYPES, ACMEChief, ACMEChiefConfig,
                                    CertificateState, CertificateStatus)

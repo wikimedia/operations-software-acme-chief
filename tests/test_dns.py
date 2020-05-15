@@ -1,5 +1,5 @@
-import mock
 import unittest
+from unittest import mock
 
 from acme_chief.dns import DEFAULT_DNS_PORT, DEFAULT_DNS_TIMEOUT, DNSNoAnswerError, Resolver
 

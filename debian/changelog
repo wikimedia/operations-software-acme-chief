@@ -1,3 +1,10 @@
+acme-chief (0.25-1) buster-wikimedia; urgency=medium
+
+  acme_chief: Handle OCSP Request issues
+  tests: use unittest.mock instead of the 3rd party mock module
+
+ -- Valentin Gutierrez <vgutierrez@wikimedia.org>  Fri, 15 May 2020 17:42:39 +0000
+
 acme-chief (0.24-1) buster-wikimedia; urgency=medium
 
   requests: Fix content-type on fetch_certificate

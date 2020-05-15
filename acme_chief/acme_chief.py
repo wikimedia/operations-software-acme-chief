@@ -902,7 +902,7 @@ def main():
     responsible for maintaining your configured certificates - creating dummy self-signed
     ones to start with, then having them replaced with ones from your ACME server. This does
     not provide the ACMEChief API.""")
-    parser.add_argument('--version', action='version', version='0.24')
+    parser.add_argument('--version', action='version', version='0.25')
     parser.parse_args()
     ACMEChief().run()
 

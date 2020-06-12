@@ -233,19 +233,26 @@ class ACMEChiefTest(unittest.TestCase):
                                     'rsa-2048',
                                     file_type='cert',
                                     kind='new',
-                                    cert_type='cert_only'), mode=CertificateSaveMode.CERT_ONLY),
+                                    cert_type='cert_only'), mode=CertificateSaveMode.CERT_ONLY, embedded_key=None),
                                     mock.call().save(
                                     self.instance._get_path('test_certificate',
                                     'rsa-2048',
                                     file_type='cert',
                                     kind='new',
-                                    cert_type='chain_only'), mode=CertificateSaveMode.CHAIN_ONLY),
+                                    cert_type='cert_key'),
+                                    mode=CertificateSaveMode.CERT_ONLY, embedded_key=rsa_key_mock.return_value),
                                     mock.call().save(
                                     self.instance._get_path('test_certificate',
                                     'rsa-2048',
                                     file_type='cert',
                                     kind='new',
-                                    cert_type='full_chain'), mode=CertificateSaveMode.FULL_CHAIN)])
+                                    cert_type='chain_only'), mode=CertificateSaveMode.CHAIN_ONLY, embedded_key=None),
+                                    mock.call().save(
+                                    self.instance._get_path('test_certificate',
+                                    'rsa-2048',
+                                    file_type='cert',
+                                    kind='new',
+                                    cert_type='full_chain'), mode=CertificateSaveMode.FULL_CHAIN, embedded_key=None)])
         push_live_mock.assert_called_once_with('test_certificate')
 
     @mock.patch.object(ACMEAccount, 'load')
@@ -925,17 +932,26 @@ class ACMEChiefStatusTransitionTests(unittest.TestCase):
                                                                                          'rsa-2048', file_type='cert',
                                                                                          kind='new',
                                                                                          cert_type='cert_only'),
-                                                                 mode=CertificateSaveMode.CERT_ONLY),
+                                                                 mode=CertificateSaveMode.CERT_ONLY,
+                                                                 embedded_key=None),
+                              mock.call().get_certificate().save(self.instance._get_path('test_certificate',
+                                                                                         'rsa-2048', file_type='cert',
+                                                                                         kind='new',
+                                                                                         cert_type='cert_key'),
+                                                                 mode=CertificateSaveMode.CERT_ONLY,
+                                                                 embedded_key=pkey_loader_mock.return_value),
                               mock.call().get_certificate().save(self.instance._get_path('test_certificate',
                                                                                          'rsa-2048', file_type='cert',
                                                                                          kind='new',
                                                                                          cert_type='chain_only'),
-                                                                 mode=CertificateSaveMode.CHAIN_ONLY),
+                                                                 mode=CertificateSaveMode.CHAIN_ONLY,
+                                                                 embedded_key=None),
                               mock.call().get_certificate().save(self.instance._get_path('test_certificate',
                                                                                          'rsa-2048', file_type='cert',
                                                                                          kind='new',
                                                                                          cert_type='full_chain'),
-                                                                 mode=CertificateSaveMode.FULL_CHAIN)
+                                                                 mode=CertificateSaveMode.FULL_CHAIN,
+                                                                 embedded_key=None)
         ]
         get_acme_session_mock.assert_has_calls(acme_session_calls)
         handle_ready_mock.assert_called_once_with('test_certificate', 'rsa-2048')

@@ -287,6 +287,7 @@ class CertificateTest(unittest.TestCase):
         from_date = datetime.datetime.utcnow()
         until_date = from_date + datetime.timedelta(days=90)
         initial_cert = get_self_signed_certificate(from_date, until_date)
+        private_key = initial_cert.private_key
 
         cert = Certificate(initial_cert.pem)
         self.assertIsInstance(cert.certificate, crypto_x509.Certificate)
@@ -307,9 +308,11 @@ class CertificateTest(unittest.TestCase):
             self.assertEqual(full_chain_cert.chain[1].certificate.serial_number, SECOND_CERT_SERIAL_NUMBER)
 
             cert_only_path = os.path.join(temp_dir, 'cert.crt')
+            cert_key_path = os.path.join(temp_dir, 'cert.crt.key')
             chain_only_path = os.path.join(temp_dir, 'chain.crt')
             full_chain_path = os.path.join(temp_dir, 'chained.crt')
             full_chain_cert.save(cert_only_path, mode=CertificateSaveMode.CERT_ONLY)
+            full_chain_cert.save(cert_key_path, mode=CertificateSaveMode.CERT_ONLY, embedded_key=private_key)
             full_chain_cert.save(chain_only_path, mode=CertificateSaveMode.CHAIN_ONLY)
             full_chain_cert.save(full_chain_path, mode=CertificateSaveMode.FULL_CHAIN)
 
@@ -317,12 +320,26 @@ class CertificateTest(unittest.TestCase):
             self.assertEqual(len(cert_only.chain), 1)
             self.assertEqual(cert_only.certificate.serial_number, FIRST_CERT_SERIAL_NUMBER)
             self.assertEqual(cert_only.ocsp_uri, 'http://ocsp.digicert.com')
+            with self.assertRaises((ValueError, X509Error)):
+                PrivateKeyLoader.load(cert_only_path)
+
+            cert_key = Certificate.load(cert_key_path)
+            self.assertEqual(len(cert_key.chain), 1)
+            self.assertEqual(cert_key.certificate.serial_number, FIRST_CERT_SERIAL_NUMBER)
+            self.assertEqual(cert_key.ocsp_uri, 'http://ocsp.digicert.com')
+            embedded_key = PrivateKeyLoader.load(cert_key_path)
+            self.assertIsInstance(embedded_key, RSAPrivateKey)
 
             chain_only = Certificate.load(chain_only_path)
             self.assertEqual(len(chain_only.chain), 1)
             self.assertEqual(chain_only.certificate.serial_number, SECOND_CERT_SERIAL_NUMBER)
+            with self.assertRaises((ValueError, X509Error)):
+                PrivateKeyLoader.load(chain_only_path)
 
             full_chain = Certificate.load(full_chain_path)
             self.assertEqual(len(full_chain.chain), 2)
             self.assertEqual(full_chain.chain[0].certificate.serial_number, FIRST_CERT_SERIAL_NUMBER)
             self.assertEqual(full_chain.chain[1].certificate.serial_number, SECOND_CERT_SERIAL_NUMBER)
+            with self.assertRaises((ValueError, X509Error)):
+                PrivateKeyLoader.load(full_chain_path)
+

@@ -25,6 +25,7 @@ DEFAULT_SIGNATURE_ALGORITHM = hashes.SHA256()
 DEFAULT_EC_CURVE = ec.SECP256R1  # pylint: disable=invalid-name
 DEFAULT_RENEWAL_PERIOD = timedelta(days=30)
 OPENER_MODE = 0o640
+PEM_HEADER = b'-----BEGIN CERTIFICATE-----'
 PEM_HEADER_AND_FOOTER_LEN = 52
 
 
@@ -114,14 +115,19 @@ class PrivateKey(abc.ABC):
             format=serialization.PublicFormat.SubjectPublicKeyInfo,
         )
 
+    @property
+    def private_pem(self):
+        """Return the PEM of the private key"""
+        return self.key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.TraditionalOpenSSL,
+            encryption_algorithm=serialization.NoEncryption(),
+        )
+
     def save(self, filename):
         """Persists the private key on disk"""
         with open(filename, 'wb', opener=secure_opener) as key_file:
-            key_file.write(self.key.private_bytes(
-                encoding=serialization.Encoding.PEM,
-                format=serialization.PrivateFormat.TraditionalOpenSSL,
-                encryption_algorithm=serialization.NoEncryption(),
-            ))
+            key_file.write(self.private_pem)
 
 
 class RSAPrivateKey(PrivateKey):
@@ -290,7 +296,7 @@ class Certificate:
 
     def _parse_chain_pem(self, pem):
         len_pem = len(pem)
-        if len_pem <= PEM_HEADER_AND_FOOTER_LEN:
+        if len_pem <= PEM_HEADER_AND_FOOTER_LEN or PEM_HEADER not in pem:
             return
 
         self.chain.append(Certificate(pem, parse_chain=False))
@@ -348,7 +354,7 @@ class Certificate:
             return []
         return [v.value for v in san_ext.value]
 
-    def save(self, path, mode=CertificateSaveMode.CERT_ONLY):
+    def save(self, path, mode=CertificateSaveMode.CERT_ONLY, embedded_key=None):
         """Persists the certificate on disk serialized as a PEM"""
         if mode is CertificateSaveMode.CERT_ONLY:
             save_chain = self.chain[0:1]
@@ -357,9 +363,16 @@ class Certificate:
         else:
             save_chain = self.chain
 
-        with open(path, 'wb') as pem_file:
+        if embedded_key is None:
+            opener = None
+        else:
+            opener = secure_opener
+
+        with open(path, 'wb', opener=opener) as pem_file:
             for cert in save_chain:
                 pem_file.write(cert.pem)
+            if embedded_key is not None:
+                pem_file.write(embedded_key.private_pem)
 
     def needs_renew(self, renewal_period=DEFAULT_RENEWAL_PERIOD):
         """Returns True if the certificate needs to be renewed"""

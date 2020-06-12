@@ -30,6 +30,7 @@ REQUIRED_PARAMETERS = {
 
 PARTS = (
     '.crt',
+    '.crt.key',
     '.chain.crt',
     '.chained.crt',
     '.key',

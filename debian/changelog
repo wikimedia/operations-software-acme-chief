@@ -1,3 +1,10 @@
+acme-chief (0.26-1) buster-wikimedia; urgency=medium
+
+  acme_chief,x509: Provide .crt.key file support
+  api: Allow acme-chief clients to fetch .crt.key files
+
+ -- Valentin Gutierrez <vgutierrez@wikimedia.org>  Mon, 15 Jun 2020 12:36:55 +0000
+
 acme-chief (0.25-1) buster-wikimedia; urgency=medium
 
   acme_chief: Handle OCSP Request issues

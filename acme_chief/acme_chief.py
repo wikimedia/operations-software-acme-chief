@@ -115,6 +115,11 @@ CERTIFICATE_TYPES = {
         'save_mode': CertificateSaveMode.FULL_CHAIN,
         'file_name': '{key_type_id}.chained.crt',
         'embedded_key': False,
+    },
+    'full_chain_key': {
+        'save_mode': CertificateSaveMode.FULL_CHAIN,
+        'file_name': '{key_type_id}.chained.crt.key',
+        'embedded_key': True,
     }
 }
 

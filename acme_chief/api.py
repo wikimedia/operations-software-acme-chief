@@ -33,6 +33,7 @@ PARTS = (
     '.crt.key',
     '.chain.crt',
     '.chained.crt',
+    '.chained.crt.key',
     '.key',
     '.ocsp',
 )

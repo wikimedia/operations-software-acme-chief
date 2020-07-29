@@ -1,0 +1,5 @@
+*.egg-info
+/.coverage
+/.python-version
+/.tox/
+__pycache__

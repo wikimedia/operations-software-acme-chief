@@ -1,3 +1,10 @@
+acme-chief (0.27-1) buster-wikimedia; urgency=medium
+
+  acme_chief: Provide .chained.crt.key file support
+  api: Allow acme-chief clients to fetch .chained.crt.key files
+
+ -- Valentin Gutierrez <vgutierrez@wikimedia.org>  Thu, 30 Jul 2020 11:08:32 +0000
+
 acme-chief (0.26-1) buster-wikimedia; urgency=medium
 
   acme_chief,x509: Provide .crt.key file support

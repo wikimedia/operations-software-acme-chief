@@ -87,7 +87,7 @@ def get_file_metadata(file_path, file_contents, clients_path):
     }
 
 
-def get_directory_metadata(certname, directory_path, clients_path):
+def get_directory_metadata(certname, directory_path, clients_path, valid_parts):
     """Generates the metadata for a whole certname directory and fixes paths to make Puppet clients happy"""
     ret = []
     ret.append(get_file_metadata(directory_path, None, clients_path))
@@ -103,6 +103,8 @@ def get_directory_metadata(certname, directory_path, clients_path):
                                                            dir_metadata['destination'].split(os.sep)[-1])
             ret.append(dir_metadata)
         for file_name in files:
+            if file_name not in valid_parts:
+                continue
             file_path = os.path.join(root, file_name)
             try:
                 with open(file_path, 'rb') as explored_f:
@@ -221,7 +223,8 @@ def create_app(config_dir=PATHS['config'], certificates_dir=PATHS['certificates'
                                                               state['config'].api['clients_root_directory'])),
                                   mimetype='text/yaml')
 
-        metadatas = get_directory_metadata(certname, certname_path, state['config'].api['clients_root_directory'])
+        metadatas = get_directory_metadata(certname, certname_path, state['config'].api['clients_root_directory'],
+                                           valid_parts)
         return flask.Response(yaml.dump(metadatas), mimetype='text/yaml')
 
     return app

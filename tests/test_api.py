@@ -85,6 +85,12 @@ class ACMEChiefApiTest(unittest.TestCase):
             for file_name in ['{}.crt', '{}.crt.key', '{}.chain.crt', '{}.chained.crt', '{}.chained.crt.key', '{}.key', '{}.ocsp']:
                 yield file_name.format(key_type)
 
+    @staticmethod
+    def _get_invalid_parts():
+        for key_type in KEY_TYPES:
+            for file_name in ('{}.invalid.crt', '{}.invalid.key'):
+                yield file_name.format(key_type)
+
     def _populate_files(self):
         for certname in self.config.certificates:
             cert_path = os.path.join(self.certificates_path.name, ACMEChief.certs_path, certname)
@@ -95,6 +101,11 @@ class ACMEChiefApiTest(unittest.TestCase):
                        target_is_directory=True)
 
             for part in self._get_valid_parts():
+                path = os.path.join(cert_version_path, part)
+                with open(path, 'wb', opener=secure_opener) as cert_file:
+                    cert_file.write(FILE_CONTENT)
+
+            for part in self._get_invalid_parts():
                 path = os.path.join(cert_version_path, part)
                 with open(path, 'wb', opener=secure_opener) as cert_file:
                     cert_file.write(FILE_CONTENT)

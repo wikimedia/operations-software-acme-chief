@@ -1,3 +1,9 @@
+acme-chief (0.28-1) buster-wikimedia; urgency=medium
+
+  api: Exclude not valid parts from get_directory_metadata output
+
+ -- Valentin Gutierrez <vgutierrez@wikimedia.org>  Tue, 04 Aug 2020 10:18:05 +0000
+
 acme-chief (0.27-1) buster-wikimedia; urgency=medium
 
   acme_chief: Provide .chained.crt.key file support

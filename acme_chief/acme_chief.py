@@ -100,26 +100,49 @@ CERTIFICATE_TYPES = {
         'save_mode': CertificateSaveMode.CERT_ONLY,
         'file_name': '{key_type_id}.crt',
         'embedded_key': False,
+        'alternative_chain': False,
     },
     'cert_key': {
         'save_mode': CertificateSaveMode.CERT_ONLY,
         'file_name': '{key_type_id}.crt.key',
         'embedded_key': True,
+        'alternative_chain': False,
     },
     'chain_only': {
         'save_mode': CertificateSaveMode.CHAIN_ONLY,
         'file_name': '{key_type_id}.chain.crt',
         'embedded_key': False,
+        'alternative_chain': False,
     },
     'full_chain': {
         'save_mode': CertificateSaveMode.FULL_CHAIN,
         'file_name': '{key_type_id}.chained.crt',
         'embedded_key': False,
+        'alternative_chain': False,
     },
     'full_chain_key': {
         'save_mode': CertificateSaveMode.FULL_CHAIN,
         'file_name': '{key_type_id}.chained.crt.key',
         'embedded_key': True,
+        'alternative_chain': False,
+    },
+    'alt_chain_only': {
+        'save_mode': CertificateSaveMode.CHAIN_ONLY,
+        'file_name': '{key_type_id}.alt.chain.crt',
+        'embedded_key': False,
+        'alternative_chain': True,
+    },
+    'full_alt_chain': {
+        'save_mode': CertificateSaveMode.FULL_CHAIN,
+        'file_name': '{key_type_id}.alt.chained.crt',
+        'embedded_key': False,
+        'alternative_chain': True,
+    },
+    'full_alt_chain_key': {
+        'save_mode': CertificateSaveMode.FULL_CHAIN,
+        'file_name': '{key_type_id}.alt.chained.crt.key',
+        'embedded_key': True,
+        'alternative_chain': True,
     }
 }
 
@@ -435,7 +458,8 @@ class ACMEChief():
                     else:
                         embedded_key = None
                     cert.save(self._get_path(cert_id, key_type_id, file_type='cert', kind='new', cert_type=cert_type),
-                              mode=cert_type_details['save_mode'], embedded_key=embedded_key)
+                              mode=cert_type_details['save_mode'], embedded_key=embedded_key,
+                              alternative_chain=cert_type_details['alternative_chain'])
                 self.cert_status[cert_id][key_type_id].status = CertificateStatus.SELF_SIGNED
                 self._push_live_certificate(cert_id)
 
@@ -751,7 +775,8 @@ class ACMEChief():
                     embedded_key = None
                 certificate.save(self._get_path(cert_id, key_type_id, file_type='cert',
                                                 kind='new', cert_type=cert_type),
-                                 mode=cert_type_details['save_mode'], embedded_key=embedded_key)
+                                 mode=cert_type_details['save_mode'], embedded_key=embedded_key,
+                                 alternative_chain=cert_type_details['alternative_chain'])
         except OSError:
             logger.exception("Problem persisting certificate %s / %s on disk", cert_id, key_type_id)
             return CertificateStatus.CERTIFICATE_ISSUED

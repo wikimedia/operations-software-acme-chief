@@ -284,25 +284,33 @@ class SelfSignedCertificate(BaseX509Builder):
 
 class Certificate:
     """X.509 certificate"""
-    def __init__(self, pem, parse_chain=True):
+    def __init__(self, pem, parse_chain=True, alternative_chain_pem=None):
         try:
             self.certificate = crypto_x509.load_pem_x509_certificate(pem, CRYPTOGRAPHY_BACKEND)
         except (TypeError, ValueError) as load_pem_error:
             raise X509Error('Unable to parse PEM') from load_pem_error
 
         self.chain = [self]
+        self.alternative_chain = [self]
         if parse_chain:
             self._parse_chain_pem(pem[len(self.pem):].lstrip())
+            if alternative_chain_pem:
+                self._parse_chain_pem(alternative_chain_pem[len(self.pem):].lstrip(), alternative_chain=True)
 
-    def _parse_chain_pem(self, pem):
+    def _parse_chain_pem(self, pem, alternative_chain=False):
         len_pem = len(pem)
         if len_pem <= PEM_HEADER_AND_FOOTER_LEN or PEM_HEADER not in pem:
             return
 
-        self.chain.append(Certificate(pem, parse_chain=False))
+        if alternative_chain:
+            target_chain = self.alternative_chain
+        else:
+            target_chain = self.chain
+
+        target_chain.append(Certificate(pem, parse_chain=False))
         len_last_pem = len(self.chain[-1].pem)
         if len_pem - len_last_pem > PEM_HEADER_AND_FOOTER_LEN:
-            self._parse_chain_pem(pem[len_last_pem:].lstrip())
+            self._parse_chain_pem(pem[len_last_pem:].lstrip(), alternative_chain=alternative_chain)
 
     @staticmethod
     def load(path):
@@ -354,14 +362,20 @@ class Certificate:
             return []
         return [v.value for v in san_ext.value]
 
-    def save(self, path, mode=CertificateSaveMode.CERT_ONLY, embedded_key=None):
+    def save(self, path, mode=CertificateSaveMode.CERT_ONLY, embedded_key=None, alternative_chain=False):
         """Persists the certificate on disk serialized as a PEM"""
-        if mode is CertificateSaveMode.CERT_ONLY:
-            save_chain = self.chain[0:1]
-        elif mode is CertificateSaveMode.CHAIN_ONLY:
-            save_chain = self.chain[1:]
+
+        if alternative_chain:
+            target_chain = self.alternative_chain
         else:
-            save_chain = self.chain
+            target_chain = self.chain
+
+        if mode is CertificateSaveMode.CERT_ONLY:
+            save_chain = target_chain[0:1]
+        elif mode is CertificateSaveMode.CHAIN_ONLY:
+            save_chain = target_chain[1:]
+        else:
+            save_chain = target_chain
 
         if embedded_key is None:
             opener = None

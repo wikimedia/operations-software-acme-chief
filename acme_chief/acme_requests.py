@@ -375,7 +375,7 @@ class ACMERequests:
         try:
             return self.orders[csr_id]
         except KeyError:
-            raise ACMEOrderNotFound('csr_id {} not found'.format(csr_id))
+            raise ACMEOrderNotFound('csr_id {} not found'.format(csr_id))  # pylint: disable=raise-missing-from
 
     def push_csr(self, csr):
         """
@@ -442,11 +442,11 @@ class ACMERequests:
             polled_order = self.acme_client.poll_authorizations(order, deadline=deadline)
         except errors.TimeoutError:
             # TimeoutError is raised if the challenges have not been validated yet
-            raise ACMEChallengeNotValidatedError('ACME directory has not been able to validate the challenge(s) yet')
-        except errors.ValidationError:
+            raise ACMEChallengeNotValidatedError('ACME directory has not been able to validate the challenge(s) yet')  # noqa: E501 pylint: disable=raise-missing-from
+        except errors.ValidationError as validation_error:
             logger.error("ACME directory has rejected the challenge(s) for order %s", order.uri)
             self._clean(csr_id)
-            raise ACMEInvalidChallengeError('Unable to get certificate')
+            raise ACMEInvalidChallengeError('Unable to get certificate') from validation_error
         except errors.Error as polling_error:
             logger.error("ACME directory has returned a generic error while polling authorizations for order %s",
                          order.uri)
@@ -481,7 +481,7 @@ class ACMERequests:
         try:
             certificate_order = self.acme_client.fetch_certificate(finished_order, deadline=deadline)
         except errors.TimeoutError:
-            raise ACMETimeoutFetchingCertificateError('Timeout waiting for the ACME directory to finalize the order')
+            raise ACMETimeoutFetchingCertificateError('Timeout waiting for the ACME directory to finalize the order')  # noqa: E501 pylint: disable=raise-missing-from
         except errors.IssuanceError as issuance_error:
             self._clean(csr_id)
             raise ACMEError('Unable to get certificate') from issuance_error

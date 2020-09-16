@@ -35,8 +35,8 @@ class Resolver:
         if nameservers is not None:
             try:
                 self._resolver.nameservers = self.resolve_dns_servers(nameservers)
-            except (socket.gaierror, UnicodeError):
-                raise AttributeError('Invalid nameseservers specified: {}'.format(nameservers))
+            except (socket.gaierror, UnicodeError) as resolve_error:
+                raise AttributeError('Invalid nameseservers specified: {}'.format(nameservers)) from resolve_error
 
     @staticmethod
     def resolve_dns_servers(dns_servers):

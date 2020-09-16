@@ -82,7 +82,9 @@ class ACMEChiefApiTest(unittest.TestCase):
     @staticmethod
     def _get_valid_parts():
         for key_type in KEY_TYPES:
-            for file_name in ['{}.crt', '{}.crt.key', '{}.chain.crt', '{}.chained.crt', '{}.chained.crt.key', '{}.key', '{}.ocsp']:
+            for file_name in ['{}.crt', '{}.crt.key', '{}.chain.crt', '{}.chained.crt', '{}.chained.crt.key',
+                              '{}.alt.chain.crt', '{}.alt.chained.crt', '{}.alt.chained.crt.key',
+                              '{}.key', '{}.ocsp']:
                 yield file_name.format(key_type)
 
     @staticmethod

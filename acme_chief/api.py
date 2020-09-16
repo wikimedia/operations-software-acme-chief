@@ -34,6 +34,9 @@ PARTS = (
     '.chain.crt',
     '.chained.crt',
     '.chained.crt.key',
+    '.alt.chain.crt',
+    '.alt.chained.crt',
+    '.alt.chained.crt.key',
     '.key',
     '.ocsp',
 )

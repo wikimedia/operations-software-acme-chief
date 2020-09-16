@@ -220,7 +220,7 @@ class ACMEClient(client.ClientV2):
             # TimeoutError is going to be triggered every single time because of the passed deadline
             pass
 
-    def fetch_certificate(self, orderr, deadline):
+    def fetch_certificate(self, orderr, deadline, fetch_alternative_chains=False):
         """Attempts to fetch the certificate on an already finalized order"""
         while datetime.now() < deadline:
             time.sleep(1)
@@ -229,8 +229,13 @@ class ACMEClient(client.ClientV2):
             if body.error is not None:
                 raise errors.IssuanceError(body.error)
             if body.certificate is not None:
-                certificate_response = self._post_as_get(body.certificate).text
-                return orderr.update(body=body, fullchain_pem=certificate_response)
+                certificate_response = self._post_as_get(body.certificate)
+                orderr = orderr.update(body=body, fullchain_pem=certificate_response.text)
+                if hasattr(self, '_get_links') and fetch_alternative_chains:
+                    alt_chains_urls = self._get_links(certificate_response, 'alternate')
+                    alt_chains = [self._post_as_get(url).text for url in alt_chains_urls]
+                    orderr = orderr.update(alternative_fullchains_pem=alt_chains)
+                return orderr
         raise errors.TimeoutError()
 
 
@@ -479,7 +484,8 @@ class ACMERequests:
         finished_order = self._get_order(csr_id)
 
         try:
-            certificate_order = self.acme_client.fetch_certificate(finished_order, deadline=deadline)
+            certificate_order = self.acme_client.fetch_certificate(finished_order, deadline=deadline,
+                                                                   fetch_alternative_chains=True)
         except errors.TimeoutError:
             raise ACMETimeoutFetchingCertificateError('Timeout waiting for the ACME directory to finalize the order')  # noqa: E501 pylint: disable=raise-missing-from
         except errors.IssuanceError as issuance_error:
@@ -491,7 +497,14 @@ class ACMERequests:
         self._clean(csr_id)
 
         try:
-            certificate = Certificate(certificate_order.fullchain_pem.encode('utf-8'))
+            if hasattr(certificate_order, 'alternative_fullchains_pem') and \
+               len(certificate_order.alternative_fullchains_pem) >= 1:
+                alternative_chain_pem = certificate_order.alternative_fullchains_pem[0].encode('utf-8')
+            else:
+                alternative_chain_pem = None
+
+            certificate = Certificate(certificate_order.fullchain_pem.encode('utf-8'),
+                                      alternative_chain_pem=alternative_chain_pem)
         except X509Error as certificate_error:
             raise ACMEIssuedCertificateError('Received invalid PEM from ACME server') from certificate_error
 

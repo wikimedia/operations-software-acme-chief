@@ -78,7 +78,7 @@ class ACMEChiefConfig:
         if confd_path is None:
             confd_path = os.path.dirname(file_name)
 
-        with open(file_name) as config_file:
+        with open(file_name, encoding='ascii') as config_file:
             config = yaml.safe_load(config_file)
 
         default_account = ACMEChiefConfig._get_default_account(config['accounts'])
@@ -90,7 +90,7 @@ class ACMEChiefConfig:
         for fname in os.listdir(confd_path):
             file_path = os.path.join(confd_path, fname)
             logger.debug("Loading config file: %s", file_path)
-            with open(file_path) as conf_f:
+            with open(file_path, encoding='ascii') as conf_f:
                 conf_data = yaml.safe_load(conf_f)
                 if conf_data['certname'] not in config['certificates']:
                     logger.warning("Certificate %s referenced on %s not found in general config",

@@ -272,7 +272,7 @@ class ACMEChief():
             ACMEChallengeType.HTTP01: os.path.join(certificates_path, ACMEChief.http_challenges_path),
         }
         self.config = None
-        self.acme_sessions = dict()
+        self.acme_sessions = {}
         self.cert_status = collections.defaultdict(dict)
         signal.signal(signal.SIGHUP, self.sighup_handler)
         self.sighup_handler()

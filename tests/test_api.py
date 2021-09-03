@@ -82,6 +82,7 @@ class ACMEChiefApiTest(unittest.TestCase):
     @staticmethod
     def _get_valid_parts():
         for key_type in KEY_TYPES:
+            # '{}.chained.crt.key.ocsp' is ommited here on purpose as it's a symlink instead of a regular file
             for file_name in ['{}.crt', '{}.crt.key', '{}.chain.crt', '{}.chained.crt', '{}.chained.crt.key',
                               '{}.alt.chain.crt', '{}.alt.chained.crt', '{}.alt.chained.crt.key',
                               '{}.key', '{}.ocsp']:
@@ -107,10 +108,15 @@ class ACMEChiefApiTest(unittest.TestCase):
                 with open(path, 'wb', opener=secure_opener) as cert_file:
                     cert_file.write(FILE_CONTENT)
 
+            for key_type in KEY_TYPES:
+                os.symlink('{}.ocsp'.format(key_type), os.path.join(cert_path, ACMEChief.live_symlink_name,
+                                                                    '{}.chained.crt.key.ocsp'.format(key_type)))
+
             for part in self._get_invalid_parts():
                 path = os.path.join(cert_version_path, part)
                 with open(path, 'wb', opener=secure_opener) as cert_file:
                     cert_file.write(FILE_CONTENT)
+
 
     def test_get_without_headers(self):
         args = {
@@ -256,6 +262,8 @@ class ACMEChiefApiTest(unittest.TestCase):
         expected_metadata['link'].append((main_path, 'new')) # /certname/new
         for part in self._get_valid_parts():
             expected_metadata['file'].append((main_path, os.path.join(CERT_VERSION, part))) # /certname/md5/part
+        for key_type in KEY_TYPES:
+            expected_metadata['link'].append((main_path, os.path.join(CERT_VERSION, '{}.chained.crt.key.ocsp'.format(key_type)))) # /certname/md5/{key_type_id}.chained.crt.key.ocsp
         url = VALID_METADATAS_ROUTE.format(**args)
         result = self.app.get(url, headers=VALID_HEADERS, query_string=METADATAS_QUERY_PARAMS)
         self.assertEqual(result.status_code, 200)
@@ -269,10 +277,10 @@ class ACMEChiefApiTest(unittest.TestCase):
                         found = True
                         break
                 self.assertTrue(found, "Unexpected metadata entry in file_metadatas response")
-                if metadata['type'] in ('link', 'directory'):
+                if metadata['type'] == 'directory':
                     self.assertEqual(metadata['checksum']['type'], 'ctime')
-                    if metadata['type'] == 'link':
-                        self.assertIsNotNone(metadata['destination'])
+                elif metadata['type'] == 'link':
+                    self.assertIsNotNone(metadata['destination'])
 
     def test_get_directory_metadata(self):
         args = {

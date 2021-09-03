@@ -103,7 +103,7 @@ def get_directory_metadata(certname, directory_path, clients_path, valid_parts):
             dir_metadata['relative_path'] = dirname
             if dir_metadata['destination'] is not None:
                 dir_metadata['destination'] = os.path.join(clients_path, certname,
-                                                           dir_metadata['destination'].split(os.sep)[-1])
+                                                           dir_metadata['destination'].rsplit(os.sep, maxsplit=1)[1])
             ret.append(dir_metadata)
         for file_name in files:
             if file_name not in valid_parts:

@@ -109,7 +109,7 @@ class BaseACMEChallenge(abc.ABC):
 
     def save(self, file_name):
         """Persists the challenge on disk"""
-        with open(file_name, 'w') as challenge_file:
+        with open(file_name, 'w', encoding="ascii") as challenge_file:
             challenge_file.write(self.validation)
 
     @abc.abstractmethod
@@ -307,7 +307,7 @@ class ACMEAccount:
         paths = ACMEAccount._get_paths(account_id, base_path=base_path)
 
         key = PrivateKeyLoader.load(paths[ACMEAccountFiles.KEY])
-        with open(paths[ACMEAccountFiles.REGR], 'r') as regr_file:
+        with open(paths[ACMEAccountFiles.REGR], 'r', encoding="ascii") as regr_file:
             regr = messages.RegistrationResource.json_loads(regr_file.read())
 
         return ACMEAccount(key=key, regr=regr, base_path=base_path, directory_url=directory_url)
@@ -316,7 +316,7 @@ class ACMEAccount:
         """Stores the account on disk to be used in the future"""
         paths = ACMEAccount._get_paths(self.account_id, base_path=self.base_path, create_directory=True)
         self.key.save(paths[ACMEAccountFiles.KEY])
-        with open(paths[ACMEAccountFiles.REGR], 'w', opener=secure_opener) as regr_file:
+        with open(paths[ACMEAccountFiles.REGR], 'w', opener=secure_opener, encoding="ascii") as regr_file:
             regr_file.write(self.regr.json_dumps())
 
 

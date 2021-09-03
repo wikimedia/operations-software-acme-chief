@@ -312,6 +312,10 @@ class ACMEChief():
     def _get_symlink_path(self, cert_id, kind='live'):
         return os.path.join(self.certs_path, cert_id, kind)
 
+    def _get_ocsp_symlink_path(self, cert_id, key_type_id, kind='live', cert_type='full_chain_key'):
+        file_name = '{}.ocsp'.format(CERTIFICATE_TYPES[cert_type]['file_name'].format(key_type_id=key_type_id))
+        return os.path.join(self.certs_path, cert_id, kind, file_name)
+
     def _get_path(self, cert_id, key_type_id, file_type='cert', kind='live', cert_type='cert_only'):
         if file_type == 'cert':
             file_name = CERTIFICATE_TYPES[cert_type]['file_name'].format(key_type_id=key_type_id)
@@ -889,6 +893,12 @@ class ACMEChief():
                 ocsp_response = ocsp_request.fetch_response()
                 ocsp_response.save(ocsp_response_path)
                 logger.info("%s OCSP response refreshed successfully for %s / %s", kind, cert_id, key_type_id)
+                # Provide a symlink to the OCSP response for cert_type=full_chain_key with ".ocsp" suffix
+                ocsp_response_symlink_path = self._get_ocsp_symlink_path(cert_id, key_type_id, kind=kind)
+                ocsp_symlink = pathlib.Path(ocsp_response_symlink_path)
+                if not ocsp_symlink.exists():
+                    symlink_source = os.path.basename(ocsp_response_path)
+                    os.symlink(symlink_source, ocsp_symlink, target_is_directory=False)
             except (OCSPRequestError, OCSPResponseError):
                 logger.exception("Unable to fetch %s OCSP response for %s / %s", kind, cert_id, key_type_id)
             except OSError:

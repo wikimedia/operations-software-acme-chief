@@ -280,7 +280,7 @@ class ACMEChiefApiTest(unittest.TestCase):
                 if metadata['type'] == 'directory':
                     self.assertEqual(metadata['checksum']['type'], 'ctime')
                 elif metadata['type'] == 'link':
-                    self.assertIsNotNone(metadata['destination'])
+                    self.assertIn(main_path, metadata['destination'])
 
     def test_get_directory_metadata(self):
         args = {

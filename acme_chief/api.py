@@ -91,7 +91,7 @@ def get_file_metadata(file_path, file_contents, clients_path):
     }
 
 
-def get_directory_metadata(certname, directory_path, clients_path, valid_parts):
+def get_directory_metadata(certname, directory_path, clients_path, valid_parts):  # pylint: disable=too-many-locals
     """Generates the metadata for a whole certname directory and fixes paths to make Puppet clients happy"""
     ret = []
     ret.append(get_file_metadata(directory_path, None, clients_path))
@@ -119,6 +119,9 @@ def get_directory_metadata(certname, directory_path, clients_path, valid_parts):
             file_metadata = get_file_metadata(file_path, file_contents, clients_path)
             file_metadata['relative_path'] = os.path.join(file_metadata['path'].split(os.sep)[-2], file_name)
             file_metadata['path'] = os.path.join(clients_path, certname)
+            if file_metadata['destination'] is not None:
+                _, cert_version, part_filename = file_metadata['destination'].rsplit(os.sep, maxsplit=2)
+                file_metadata['destination'] = os.path.join(clients_path, certname, cert_version, part_filename)
             ret.append(file_metadata)
 
     return ret

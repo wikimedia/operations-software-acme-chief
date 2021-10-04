@@ -40,6 +40,7 @@ PARTS = (
     '.key',
     '.ocsp',
     '.chained.crt.key.ocsp',
+    '.alt.chained.crt.key.ocsp',
 )
 
 

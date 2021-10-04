@@ -111,6 +111,8 @@ class ACMEChiefApiTest(unittest.TestCase):
             for key_type in KEY_TYPES:
                 os.symlink('{}.ocsp'.format(key_type), os.path.join(cert_path, ACMEChief.live_symlink_name,
                                                                     '{}.chained.crt.key.ocsp'.format(key_type)))
+                os.symlink('{}.ocsp'.format(key_type), os.path.join(cert_path, ACMEChief.live_symlink_name,
+                                                                    '{}.alt.chained.crt.key.ocsp'.format(key_type)))
 
             for part in self._get_invalid_parts():
                 path = os.path.join(cert_version_path, part)
@@ -264,6 +266,7 @@ class ACMEChiefApiTest(unittest.TestCase):
             expected_metadata['file'].append((main_path, os.path.join(CERT_VERSION, part))) # /certname/md5/part
         for key_type in KEY_TYPES:
             expected_metadata['link'].append((main_path, os.path.join(CERT_VERSION, '{}.chained.crt.key.ocsp'.format(key_type)))) # /certname/md5/{key_type_id}.chained.crt.key.ocsp
+            expected_metadata['link'].append((main_path, os.path.join(CERT_VERSION, '{}.alt.chained.crt.key.ocsp'.format(key_type)))) # /certname/md5/{key_type_id}.alt.chained.crt.key.ocsp
         url = VALID_METADATAS_ROUTE.format(**args)
         result = self.app.get(url, headers=VALID_HEADERS, query_string=METADATAS_QUERY_PARAMS)
         self.assertEqual(result.status_code, 200)

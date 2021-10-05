@@ -177,7 +177,7 @@ def create_app(config_dir=PATHS['config'], certificates_dir=PATHS['certificates'
                         abort(501, 'not implemented')
 
         if part is not None and part not in valid_parts:
-            abort(400, 'part must be in {}'.format(valid_parts))
+            abort(400, f'part must be in {valid_parts}')
 
         client_dn = flask.request.headers.get('X_CLIENT_DN', '')
         if not client_dn.startswith('CN='):

@@ -313,18 +313,19 @@ class ACMEChief():
         return os.path.join(self.certs_path, cert_id, kind)
 
     def _get_ocsp_symlink_path(self, cert_id, key_type_id, kind='live', cert_type='full_chain_key'):
-        file_name = '{}.ocsp'.format(CERTIFICATE_TYPES[cert_type]['file_name'].format(key_type_id=key_type_id))
+        part_name = CERTIFICATE_TYPES[cert_type]['file_name'].format(key_type_id=key_type_id)
+        file_name = f'{part_name}.ocsp'
         return os.path.join(self.certs_path, cert_id, kind, file_name)
 
     def _get_path(self, cert_id, key_type_id, file_type='cert', kind='live', cert_type='cert_only'):
         if file_type == 'cert':
             file_name = CERTIFICATE_TYPES[cert_type]['file_name'].format(key_type_id=key_type_id)
         elif file_type == 'key':
-            file_name = '{}.key'.format(key_type_id)
+            file_name = f'{key_type_id}.key'
         elif file_type == 'ocsp':
-            file_name = '{}.ocsp'.format(key_type_id)
+            file_name = f'{key_type_id}.ocsp'
         else:
-            raise ValueError('Unknown file_type {}'.format(file_type))
+            raise ValueError(f'Unknown file_type {file_type}')
 
         return os.path.join(self.certs_path, cert_id, kind, file_name)
 
@@ -555,7 +556,7 @@ class ACMEChief():
         private_key.generate(**key_type_details['params'])
         private_key.save(self._get_path(cert_id, key_type_id, file_type='key', kind='new'))
 
-        csr_filename = '{}.{}.csr.pem'.format(cert_id, key_type_id)
+        csr_filename = f'{cert_id}.{key_type_id}.csr.pem'
         csr_fullpath = os.path.join(self.csrs_path, csr_filename)
         csr = CertificateSigningRequest(
             private_key=private_key,

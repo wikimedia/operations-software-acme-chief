@@ -78,7 +78,7 @@ class PrivateKeyLoader():
         """
         key_stat = os.stat(filename)
         if key_stat.st_mode & (stat.S_IWGRP | stat.S_IXGRP | stat.S_IRWXO):
-            raise X509Error("permissions ({:o}) are too open for {}".format(stat.S_IMODE(key_stat.st_mode), filename))
+            raise X509Error(f"permissions ({stat.S_IMODE(key_stat.st_mode):o}) are too open for {filename}")
 
         with open(filename, 'rb') as key_file:
             private_key = serialization.load_pem_private_key(

@@ -117,7 +117,7 @@ class BaseACMEChallenge(abc.ABC):
         """Checks if the challenge has been fulfilled or not. Returns a member of ACMEChallengeValidation"""
 
     def __str__(self):
-        return "Challenge type: {}".format(self.challenge_type)
+        return f"Challenge type: {self.challenge_type}"
 
 
 class DNS01ACMEChallenge(BaseACMEChallenge):
@@ -125,7 +125,7 @@ class DNS01ACMEChallenge(BaseACMEChallenge):
     def __init__(self, validation_domain_name, validation):
         super().__init__(ACMEChallengeType.DNS01, validation)
         self.validation_domain_name = validation_domain_name
-        self.file_name = "{}-{}".format(validation_domain_name, validation)
+        self.file_name = f"{validation_domain_name}-{validation}"
 
     def validate(self, **kwargs):
         logger.debug("Attempting to validate challenge %s", self)
@@ -167,7 +167,7 @@ class DNS01ACMEChallenge(BaseACMEChallenge):
         return ret
 
     def __str__(self):
-        return '{}. {} TXT {}'.format(super().__str__(), self.validation_domain_name, self.validation)
+        return f'{super().__str__()}. {self.validation_domain_name} TXT {self.validation}'
 
 
 class HTTP01ACMEChallenge(BaseACMEChallenge):
@@ -187,7 +187,7 @@ class HTTP01ACMEChallenge(BaseACMEChallenge):
         headers = {'Host': self.hostname}
         url = urlunparse((
             'http',
-            "{}:{}".format(server, port),
+            f"{server}:{port}",
             self.path,
             '',
             '',
@@ -206,7 +206,7 @@ class HTTP01ACMEChallenge(BaseACMEChallenge):
         return ACMEChallengeValidation.INVALID
 
     def __str__(self):
-        return '{}. http://{}{}: {}'.format(super().__str__(), self.hostname, self.path, self.validation)
+        return f'{super().__str__()}. http://{self.hostname}{self.path}: {self.validation}'
 
 
 class ACMEClient(client.ClientV2):
@@ -380,7 +380,7 @@ class ACMERequests:
         try:
             return self.orders[csr_id]
         except KeyError:
-            raise ACMEOrderNotFound('csr_id {} not found'.format(csr_id))  # pylint: disable=raise-missing-from
+            raise ACMEOrderNotFound(f'csr_id {csr_id} not found')  # pylint: disable=raise-missing-from
 
     def push_csr(self, csr):
         """
@@ -391,7 +391,7 @@ class ACMERequests:
         """
 
         if not isinstance(csr, CertificateSigningRequest):
-            raise TypeError("csr must be a CertificateSigningRequest instance, got: {}".format(type(csr)))
+            raise TypeError(f"csr must be a CertificateSigningRequest instance, got: {type(csr)}")
 
         try:
             new_order = self.acme_client.new_order(csr.pem)

@@ -1,3 +1,10 @@
+acme-chief (0.32-1) buster-wikimedia; urgency=medium
+
+  Adopt f-strings
+  acme_chief,api: Provide .alt.chained.crt.key.ocsp
+
+ -- Valentin Gutierrez <vgutierrez@wikimedia.org>  Tue, 05 Oct 2021 11:07:23 +0200
+
 acme-chief (0.31-1) buster-wikimedia; urgency=medium
 
   api: Fix destination on symlinks to files

@@ -128,7 +128,10 @@ class ACMEChiefTest(unittest.TestCase):
             },
             api={
                 'clients_root_directory': '/etc/acmecerts',
-            }
+            },
+            watchdog={
+                'systemd': False,
+            },
         )
 
         signal_mock.assert_called_once()
@@ -559,6 +562,12 @@ class ACMEChiefTest(unittest.TestCase):
             mock.call().fetch_response(),
         ])
 
+    @mock.patch('sdnotify.SystemdNotifier.notify')
+    def test_systemd_watchdog(self, notify_mock):
+        self.instance.config.watchdog['systemd'] = True
+        self.instance._watchdog()
+        notify_mock.assert_called_once_with('WATCHDOG=1')
+
 
 class ACMEChiefStatusTransitionTests(unittest.TestCase):
     @mock.patch('signal.signal')
@@ -612,7 +621,10 @@ class ACMEChiefStatusTransitionTests(unittest.TestCase):
             },
             api={
                 'clients_root_directory': '/etc/acmecerts',
-            }
+            },
+            watchdog={
+                'systemd': False,
+            },
         )
 
         self.patchers = []
@@ -1073,7 +1085,10 @@ class ACMEChiefDetermineStatusTest(unittest.TestCase):
             },
             api={
                 'clients_root_directory': '/etc/acmecerts',
-            }
+            },
+            watchdog={
+                'systemd': False,
+            },
         )
 
     def _configure_load_return_value(self, status):
@@ -1307,7 +1322,10 @@ class ACMEChiefIntegrationTest(BasePebbleIntegrationTest):
                 },
                 api={
                     'clients_root_directory': '/etc/acmecerts',
-                }
+                },
+                watchdog={
+                    'systemd': False,
+                },
             )
             acme_chief.cert_status = {'test_certificate': {
                 'ec-prime256v1': CertificateState(CertificateStatus.INITIAL),
@@ -1383,7 +1401,10 @@ class ACMEChiefIntegrationTest(BasePebbleIntegrationTest):
             },
             api={
                 'clients_root_directory': '/etc/acmecerts',
-            }
+            },
+            watchdog={
+                'systemd': False,
+            },
         )
         acme_chief.cert_status = {'test_certificate': {
             'ec-prime256v1': CertificateState(CertificateStatus.INITIAL),
@@ -1464,7 +1485,10 @@ class ACMEChiefIntegrationTest(BasePebbleIntegrationTest):
             },
             api={
                 'clients_root_directory': '/etc/acmecerts',
-            }
+            },
+            watchdog={
+                'systemd': False,
+            },
         )
         acme_chief.cert_status = {'test_certificate': {
             'ec-prime256v1': CertificateState(CertificateStatus.INITIAL),
@@ -1547,7 +1571,10 @@ class ACMEChiefIntegrationTest(BasePebbleIntegrationTest):
             },
             api={
                 'clients_root_directory': '/etc/acmecerts',
-            }
+            },
+            watchdog={
+                'systemd': False,
+            },
         )
         acme_chief.cert_status = {
             'test_certificate': {

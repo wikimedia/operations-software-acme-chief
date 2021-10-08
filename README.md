@@ -67,6 +67,8 @@ challenges:
         issuing_ca: 'letsencrypt.org'
 api:
     clients_root_directory: /etc/acmecerts
+watchdog:
+    systemd: true
 ```
 
 It also supports per-certificate configuration in /etc/acme-chief/conf.d. conf.d file example:

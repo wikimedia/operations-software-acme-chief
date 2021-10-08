@@ -33,6 +33,8 @@ import uuid
 from enum import Enum
 from time import sleep
 
+import sdnotify
+
 from cryptography.hazmat.primitives.asymmetric import ec
 
 from acme_chief.acme_requests import (ACMEAccount,
@@ -272,6 +274,7 @@ class ACMEChief():
             ACMEChallengeType.HTTP01: os.path.join(certificates_path, ACMEChief.http_challenges_path),
         }
         self.config = None
+        self.sdnotify = None
         self.acme_sessions = {}
         self.cert_status = collections.defaultdict(dict)
         signal.signal(signal.SIGHUP, self.sighup_handler)
@@ -412,6 +415,7 @@ class ACMEChief():
         """
         logger.info("SIGHUP received")
         self.config = ACMEChiefConfig.load(file_name=self.config_path, confd_path=self.confd_path)
+
         if self.cert_status:
             previous_status = copy.deepcopy(self.cert_status)
         else:
@@ -909,6 +913,14 @@ class ACMEChief():
             except OSError:
                 logger.exception("Unable to persist %s OCSP response for %s / %s on disk", kind, cert_id, key_type_id)
 
+    def _watchdog(self):
+        """Handle systemd watchdog"""
+        if self.config.watchdog['systemd']:
+            logger.debug("Triggering systemd watchdog")
+            if self.sdnotify is None:
+                self.sdnotify = sdnotify.SystemdNotifier()
+            self.sdnotify.notify('WATCHDOG=1')
+
     def certificate_management(self):
         """
         This functions is started in a thread to perform regular tasks.
@@ -917,6 +929,7 @@ class ACMEChief():
         """
         logger.info("Starting main loop...")
         while True:
+            self._watchdog()
             for cert_id in self.cert_status:
                 for key_type_id in KEY_TYPES:
                     cert_state = self.cert_status[cert_id][key_type_id]

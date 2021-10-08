@@ -12,7 +12,8 @@ install_requires = [
     'josepy >= 1.1.0',
     'pyOpenSSL >= 19.0.0',
     'requests >= 2.20.0',
-    'pyyaml >= 3.13'
+    'pyyaml >= 3.13',
+    'sdnotify >= 0.3.1'
 ]
 
 extras_require = {

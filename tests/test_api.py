@@ -68,7 +68,11 @@ class ACMEChiefApiTest(unittest.TestCase):
             },
             api={
                 'clients_root_directory': '/etc/acmecerts',
-            }
+            },
+            watchdog={
+                'file': None,
+                'systemd': False,
+            },
         )
         self._populate_files()
         self.app = create_app(config_dir=self.config_path.name,

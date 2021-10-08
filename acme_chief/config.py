@@ -2,7 +2,7 @@
 Module containing configuration handling classes
 
 Alex Monk <krenair@gmail.com> 2018
-Valentin Gutierrez <vgutierrez@wikimedia.org> 2018-2019
+Valentin Gutierrez <vgutierrez@wikimedia.org> 2018-2021
 """
 
 import collections
@@ -31,7 +31,8 @@ DEFAULT_API_CLIENTS_ROOT_DIRECTORY = '/etc/acmecerts'
 class ACMEChiefConfig:
     """Class representing ACMEChief configuration"""
     def __init__(self, *, accounts, certificates, default_account,
-                 authorized_hosts, authorized_regexes, challenges, api):
+                 authorized_hosts, authorized_regexes, challenges, api,
+                 watchdog):
         self.accounts = accounts
         self.certificates = certificates
         self.default_account = default_account
@@ -39,6 +40,7 @@ class ACMEChiefConfig:
         self.authorized_regexes = authorized_regexes
         self.challenges = {}
         self.api = api
+        self.watchdog = watchdog
 
         for challenge_type, challenge_config in challenges.items():
             if challenge_type == 'dns-01':
@@ -72,7 +74,7 @@ class ACMEChiefConfig:
             logger.warning('Missing dns-01 challenge configuration')
 
     @staticmethod
-    def load(file_name, confd_path=None):  # pylint: disable=too-many-locals,too-many-branches
+    def load(file_name, confd_path=None):  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
         """Load a config from the specified file_name and an optional conf.d path"""
         logger.debug("Loading config file: %s", file_name)
         if confd_path is None:
@@ -143,13 +145,20 @@ class ACMEChiefConfig:
 
         api = config.get('api', {'clients_root_directory': DEFAULT_API_CLIENTS_ROOT_DIRECTORY})
 
+        watchdog = config.get('watchdog', {'systemd': False})
+
+        if 'systemd' in watchdog:
+            watchdog['systemd'] = bool(watchdog['systemd'])
+        else:
+            watchdog['systemd'] = False
+
         return ACMEChiefConfig(accounts=config['accounts'],
                                certificates=config['certificates'],
                                default_account=default_account,
                                authorized_hosts=dict(authorized_hosts),
                                authorized_regexes=dict(authorized_regexes),
                                challenges=config['challenges'],
-                               api=api)
+                               api=api, watchdog=watchdog)
 
     @staticmethod
     def _get_default_account(accounts):

@@ -145,12 +145,12 @@ class ACMEChiefConfig:
 
         api = config.get('api', {'clients_root_directory': DEFAULT_API_CLIENTS_ROOT_DIRECTORY})
 
-        watchdog = config.get('watchdog', {'systemd': False})
-
-        if 'systemd' in watchdog:
-            watchdog['systemd'] = bool(watchdog['systemd'])
-        else:
-            watchdog['systemd'] = False
+        watchdog = {'systemd': False}
+        try:
+            if int(os.environ['WATCHDOG_USEC']) > 0:
+                watchdog['systemd'] = True
+        except (KeyError, ValueError):
+            pass
 
         return ACMEChiefConfig(accounts=config['accounts'],
                                certificates=config['certificates'],

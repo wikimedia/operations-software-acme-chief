@@ -163,3 +163,29 @@ class ACMEChiefConfigTest(unittest.TestCase):
                                             'certificate_auth_by_regex'))
         self.assertFalse(config.check_access('deployment-acmechief-testclient04.deployment-prep.eqiad.wmflabs',
                                              'certificate_auth_by_regex'))
+
+    @mock.patch.dict('os.environ', {}, clear=True)
+    def test_watchdog_usec_not_present(self):
+        self.assertNotIn('WATCHDOG_USEC', os.environ) # sanity check
+
+        with open(self.config_path, 'w') as config_file:
+            config_file.write(VALID_CONFIG_EXAMPLE)
+
+        config = ACMEChiefConfig.load(self.config_path, confd_path=self.confd_path)
+        self.assertFalse(config.watchdog['systemd'])
+
+    @mock.patch.dict('os.environ', {'WATCHDOG_USEC': '0'}, clear=True)
+    def test_watchdog_usec_is_zero(self):
+        with open(self.config_path, 'w') as config_file:
+            config_file.write(VALID_CONFIG_EXAMPLE)
+
+        config = ACMEChiefConfig.load(self.config_path, confd_path=self.confd_path)
+        self.assertFalse(config.watchdog['systemd'])
+
+    @mock.patch.dict('os.environ', {'WATCHDOG_USEC': '1000'}, clear=True)
+    def test_watchdog_usec_enabled(self):
+        with open(self.config_path, 'w') as config_file:
+            config_file.write(VALID_CONFIG_EXAMPLE)
+
+        config = ACMEChiefConfig.load(self.config_path, confd_path=self.confd_path)
+        self.assertTrue(config.watchdog['systemd'])

@@ -1,3 +1,9 @@
+acme-chief (0.33-1) buster-wikimedia; urgency=medium
+
+  * acme_chief: Add systemd based watchdog support
+
+ -- vgutierrez <vgutierrez@wikimedia.org>  Thu, 14 Oct 2021 11:11:59 +0200
+
 acme-chief (0.32-1) buster-wikimedia; urgency=medium
 
   Adopt f-strings

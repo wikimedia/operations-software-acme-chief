@@ -1,3 +1,9 @@
+acme-chief (0.34-1) buster-wikimedia; urgency=medium
+
+  * acme_chief: auto-detect systemd watchdog
+
+ -- Valentin Gutierrez <vgutierrez@wikimedia.org>  Fri, 15 Oct 2021 11:44:39 +0200
+
 acme-chief (0.33-1) buster-wikimedia; urgency=medium
 
   * acme_chief: Add systemd based watchdog support

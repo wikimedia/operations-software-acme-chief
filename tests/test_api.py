@@ -28,7 +28,10 @@ METADATAS_QUERY_PARAMS = {
     'recurse': 'true',
 }
 
-VALID_HEADERS = {'X_CLIENT_DN': 'CN=localhost'}
+VALID_HEADERS = {
+    'X_CLIENT_DN': 'CN=localhost',
+    'Accept': 'text/yaml'
+}
 
 VALID_ROUTES = [
     '/certs/{certname}/{part}',
@@ -272,21 +275,35 @@ class ACMEChiefApiTest(unittest.TestCase):
             result = self.app.get(url, headers=VALID_HEADERS, query_string=query_params)
             self.assertEqual(result.status_code, 400)
 
-    # FIXME: we should be returning PSON data according to
-    # https://puppet.com/docs/puppet/4.8/http_api/http_file_metadata.html#supported-response-formats
-    @unittest.expectedFailure
     def test_get_metadata_content_type(self):
         args = {
             'certname': list(self.config.certificates.keys())[0],
             'api': 'metadata',
+            'part': next(self._get_valid_parts()),
         }
-        for part in self._get_valid_parts():
-            args['part'] = part
+
+        with self.subTest('yaml explicitely'):
             url = VALID_ROUTES[-1].format(**args)
-            result = self.app.get(url, headers=VALID_HEADERS, query_string=METADATA_QUERY_PARAMS)
-            with self.subTest(part=part):
-                self.assertEqual(result.status_code, 200)
-                self.assertEqual(result.content_type, 'text/pson')
+            headers = {**VALID_HEADERS, 'Accept': 'text/yaml'}
+
+            result = self.app.get(url, headers=headers, query_string=METADATA_QUERY_PARAMS)
+            self.assertEqual(result.status_code, 200)
+            self.assertEqual(result.content_type, 'text/yaml; charset=utf-8')
+
+        with self.subTest('json explicitely'):
+            url = VALID_ROUTES[-1].format(**args)
+            headers = {**VALID_HEADERS, 'Accept': 'application/json'}
+
+            result = self.app.get(url, headers=headers, query_string=METADATA_QUERY_PARAMS)
+            self.assertEqual(result.status_code, 200)
+            self.assertEqual(result.content_type, 'application/json')
+
+        with self.subTest('invalid'):
+            url = VALID_ROUTES[-1].format(**args)
+            headers = {**VALID_HEADERS, 'Accept': 'invalid'}
+
+            result = self.app.get(url, headers=headers, query_string=METADATA_QUERY_PARAMS)
+            self.assertEqual(result.status_code, 400)
 
 
     def test_get_directory_metadatas(self):

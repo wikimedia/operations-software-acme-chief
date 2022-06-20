@@ -48,6 +48,19 @@ def abort(status_code, reason):
     flask.abort(flask.make_response(reason, status_code))
 
 
+def dump_with_requested_format(data):
+    """Returns the given data in the format specified in the Accept header."""
+    accept = flask.request.headers.get('Accept', '')
+
+    if 'application/json' in accept:
+        return flask.jsonify(data)
+
+    if 'text/yaml' in accept:
+        return flask.Response(yaml.dump(data), mimetype='text/yaml')
+
+    return abort(400, f'unsupported Accept header: {accept}')
+
+
 def get_file_metadata(file_path, file_contents, clients_path):
     """Returns metadata as expected by puppet v3 API."""
     path = pathlib.Path(file_path)
@@ -230,13 +243,14 @@ def create_app(config_dir=PATHS['config'], certificates_dir=PATHS['certificates'
                 if api != 'metadata':
                     return flask.Response(file_contents, mimetype='application/octet-stream')
 
-            return flask.Response(yaml.dump(get_file_metadata(fpath, file_contents,
-                                                              state['config'].api['clients_root_directory'])),
-                                  mimetype='text/yaml')
+            data = get_file_metadata(fpath, file_contents,
+                                     state['config'].api['clients_root_directory'])
+
+            return dump_with_requested_format(data)
 
         metadatas = get_directory_metadata(certname, certname_path, state['config'].api['clients_root_directory'],
                                            valid_parts)
-        return flask.Response(yaml.dump(metadatas), mimetype='text/yaml')
+        return dump_with_requested_format(metadatas)
 
     return app
 

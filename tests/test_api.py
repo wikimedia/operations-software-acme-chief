@@ -14,6 +14,7 @@ from acme_chief.x509 import secure_opener
 
 FILE_CONTENT = b'we do not care about the content'
 FILE_MD5 = '781646e7499e9219059ef9a1e7453f9c'
+FILE_SHA256 = 'e1558812dc58514064489eba74943304fa5b7e9eb90c386554aeb683f43c5fbf'
 
 CERT_VERSION = '32fb7e6f198e1b883d3691d5fc1b78d6'
 
@@ -233,6 +234,43 @@ class ACMEChiefApiTest(unittest.TestCase):
                 self.assertEqual(metadata['checksum']['value'], '{md5}' + FILE_MD5)
                 self.assertEqual(metadata['mode'], 0o640)
                 self.assertEqual(metadata['type'], 'file')
+
+    def test_get_metadata_checksum_types(self):
+        with self.subTest('sha256'):
+            args = {
+                'certname': list(self.config.certificates.keys())[0],
+                'api': 'metadata',
+                'part': next(self._get_valid_parts()),
+            }
+
+            query_params = {
+                **METADATA_QUERY_PARAMS,
+                'checksum_type': 'sha256',
+            }
+
+            url = VALID_ROUTES[-1].format(**args)
+            result = self.app.get(url, headers=VALID_HEADERS, query_string=query_params)
+            self.assertEqual(result.status_code, 200)
+            metadata = yaml.safe_load(result.data)
+
+            self.assertEqual(metadata['checksum']['type'], 'sha256')
+            self.assertEqual(metadata['checksum']['value'], '{sha256}' + FILE_SHA256)
+
+        with self.subTest('invalid'):
+            args = {
+                'certname': list(self.config.certificates.keys())[0],
+                'api': 'metadata',
+                'part': next(self._get_valid_parts()),
+            }
+
+            query_params = {
+                **METADATA_QUERY_PARAMS,
+                'checksum_type': 'invalid',
+            }
+
+            url = VALID_ROUTES[-1].format(**args)
+            result = self.app.get(url, headers=VALID_HEADERS, query_string=query_params)
+            self.assertEqual(result.status_code, 400)
 
     # FIXME: we should be returning PSON data according to
     # https://puppet.com/docs/puppet/4.8/http_api/http_file_metadata.html#supported-response-formats

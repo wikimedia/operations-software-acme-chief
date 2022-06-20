@@ -19,7 +19,6 @@ from acme_chief.config import ACMEChiefConfig
 
 REQUIRED_PARAMETERS = {
     'metadata': {
-        'checksum_type': 'md5',
         'links': 'manage',
         'source_permissions': 'ignore',
     },
@@ -73,8 +72,12 @@ def get_file_metadata(file_path, file_contents, clients_path):
         checksum_type = 'ctime'
         checksum_value = '{ctime}' + ctime_dt.strftime('%Y-%m-%d %H:%M:%S %z')
     else:
-        checksum_type = 'md5'
-        checksum_value = '{md5}' + hashlib.md5(file_contents).hexdigest()
+        checksum_type = flask.request.args.get('checksum_type', 'md5')
+        if checksum_type not in hashlib.algorithms_available:
+            abort(400, f'invalid checksum type {checksum_type}')
+
+        checksum = hashlib.new(checksum_type, file_contents).hexdigest()
+        checksum_value = f'{{{checksum_type}}}{checksum}'
 
     return {
         'path': puppet_path,

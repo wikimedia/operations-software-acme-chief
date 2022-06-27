@@ -30,6 +30,11 @@ extras_require = {
 extras_require['tests-min'] = [dep.replace('>=', '==') for dep in extras_require['tests']]
 if os.getenv('ACMECHIEF_MIN_DEPS', False):
     install_requires = [dep.replace('>=', '==') for dep in install_requires]
+    # flask 1.0.2 doesn't play well with newer versions of jinja2, itsdangerous and werkzeug
+    install_requires.insert(0, 'werkzeug == 0.14.1')
+    install_requires.insert(0, 'itsdangerous == 0.24')
+    install_requires.insert(0, 'markupsafe == 1.1.0')
+    install_requires.insert(0, 'jinja2 == 2.10')
 
 setuptools.setup(
     name="acme-chief",

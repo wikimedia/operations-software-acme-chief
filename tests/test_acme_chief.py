@@ -373,7 +373,8 @@ class ACMEChiefTest(unittest.TestCase):
         ret_value = self.instance._trigger_dns_zone_update([])
         self.assertFalse(ret_value)
 
-    def test_certificate_management(self):
+    @mock.patch.object(ACMEChief, '_fetch_ocsp_response')
+    def test_certificate_management(self, fetch_mock):
         for status in [CertificateStatus.SELF_SIGNED,
                        CertificateStatus.NEEDS_RENEWAL,
                        CertificateStatus.EXPIRED]:
@@ -432,6 +433,7 @@ class ACMEChiefTest(unittest.TestCase):
         cert_mock = mock.MagicMock()
         cert_mock.self_signed = False
         cert_mock.needs_renew.return_value = False
+        cert_mock.expired = False
         cert_mock.certificate.not_valid_before = datetime.utcnow()
         cert_mock.certificate.not_valid_after = datetime.utcnow() + timedelta(days=10)
         cert_mock.common_name = 'acmechieftest.BETA.wmflabs.org'

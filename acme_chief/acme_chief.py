@@ -870,9 +870,13 @@ class ACMEChief():
     def _fetch_ocsp_response(self, cert_id, key_type_id):
         """Fetches OCSP responses for certificates in VALID or CERTIFICATE_STAGED states"""
         for kind in ('live', 'new'):
-            cert = Certificate.load(self._get_path(cert_id, key_type_id,
-                                                   file_type='cert', kind=kind, cert_type='full_chain'))
-            if cert.ocsp_uri is None:
+            try:
+                cert = Certificate.load(self._get_path(cert_id, key_type_id,
+                                                       file_type='cert', kind=kind, cert_type='full_chain'))
+                if cert.ocsp_uri is None or cert.self_signed or cert.expired:
+                    continue
+            except FileNotFoundError:
+                # during SELF_SIGNED on a cold start the new version is not going to be there
                 continue
 
             ocsp_response_path = self._get_path(cert_id, key_type_id, file_type='ocsp', kind=kind)
@@ -936,8 +940,8 @@ class ACMEChief():
                     if not cert_state.retry:
                         logger.debug("Skipping certificate %s till at least %s", cert_id, cert_state.next_retry)
                         continue
+                    self._fetch_ocsp_response(cert_id, key_type_id)
                     if cert_state.status is CertificateStatus.VALID:
-                        self._fetch_ocsp_response(cert_id, key_type_id)
                         continue
                     if cert_state.status in (CertificateStatus.SELF_SIGNED,
                                              CertificateStatus.NEEDS_RENEWAL,
@@ -956,10 +960,8 @@ class ACMEChief():
                         new_status = self._handle_order_finalized(cert_id, key_type_id)
                     elif cert_state.status is CertificateStatus.CERTIFICATE_STAGED:
                         new_status = self._handle_ready_to_be_pushed(cert_id, key_type_id)
-                        self._fetch_ocsp_response(cert_id, key_type_id)
                     elif cert_state.status is CertificateStatus.READY_TO_BE_PUSHED:
                         new_status = self._push_live_certificate(cert_id)
-                        self._fetch_ocsp_response(cert_id, key_type_id)
                     else:
                         logger.error("Unexpected state: %s", cert_state.status)
                         continue

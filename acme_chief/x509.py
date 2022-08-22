@@ -340,6 +340,15 @@ class Certificate:
         return name_attrs[0].value
 
     @property
+    def expired(self):
+        """Returns True if the certificate is expired, False otherwise"""
+        now = datetime.utcnow()
+        if now > self.certificate.not_valid_after:
+            return True
+
+        return False
+
+    @property
     def ocsp_uri(self):
         """Gets the OCSP URI of this certificate"""
         try:

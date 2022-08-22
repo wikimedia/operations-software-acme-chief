@@ -293,6 +293,7 @@ class CertificateTest(unittest.TestCase):
         self.assertIsInstance(cert.certificate, crypto_x509.Certificate)
         self.assertEqual(cert.chain, [cert])
         self.assertFalse(cert.needs_renew())
+        self.assertFalse(cert.expired)
         self.assertTrue(cert.self_signed)
         self.assertIsNone(cert.ocsp_uri)
         mocked_now = until_date - datetime.timedelta(days=10)

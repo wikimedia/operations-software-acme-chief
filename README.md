@@ -31,6 +31,17 @@ Gutierrez <vgutierrez@wikimedia.org>.
 ## Requirements
 acme-chief requires python 3.7 or higher.
 
+### Testing
+
+acme-chief runs test suites via  [Tox](https://tox.wiki/) Most dependencies
+will be satisfied when Tox is invoked.
+
+In addition to the Python dependencies handled by Tox, acme-chief requires LetsEncrypt's
+[Pebble](https://github.com/letsencrypt/pebble/) Go module to run a test ACME server. If
+testing locally, be sure to install the same Pebble version as the CI
+[Jenkinsfile](https://gerrit.wikimedia.org/r/plugins/gitiles/integration/config/+/refs/heads/master/dockerfiles/tox-acme-chief/Dockerfile.template)
+for maximum compatibility.
+
 ## Configuration file example
 acme-chief expects its configuration file in /etc/acme-chief/config.yaml by default
 ```yaml

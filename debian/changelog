@@ -1,3 +1,13 @@
+acme-chief (0.35-1) buster-wikimedia; urgency=medium
+
+  * limit jinja2, itsdangerous and werkzeug version
+  * api: support sha256 checksums
+  * api: Offer JSON for metadata if requested
+  * readme: Add general notes for testing deps
+  * acme-chief: Unlink certificate renewal and OCSP handling
+
+ -- Valentin Gutierrez <vgutierrez@wikimedia.org>  Mon, 07 Nov 2022 12:54:38 +0100
+
 acme-chief (0.34-1) buster-wikimedia; urgency=medium
 
   * acme_chief: auto-detect systemd watchdog

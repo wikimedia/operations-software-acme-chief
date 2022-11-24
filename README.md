@@ -29,7 +29,7 @@ The license in use is GPL v3+ and the main developers are Alex Monk <krenair@gma
 Gutierrez <vgutierrez@wikimedia.org>.
 
 ## Requirements
-acme-chief requires python 3.7 or higher.
+acme-chief requires python 3.9 or higher.
 
 ### Testing
 

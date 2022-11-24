@@ -5,14 +5,14 @@ with open("README.md", "r") as fh:
     long_description = fh.read()
 
 install_requires = [
-    'acme >= 0.29.0',
-    'cryptography >= 2.4',
-    'dnspython >= 1.16.0',
-    'flask >= 1.0.2',
-    'josepy >= 1.1.0',
-    'pyOpenSSL >= 19.0.0',
-    'requests >= 2.20.0',
-    'pyyaml >= 3.13',
+    'acme >= 1.12.0',
+    'cryptography >= 3.3.2',
+    'dnspython >= 2.0.0',
+    'flask >= 2.0.1',
+    'josepy >= 1.2.0',
+    'pyOpenSSL >= 20.0.1',
+    'requests >= 2.25.1',
+    'pyyaml >= 5.3.1',
     'sdnotify >= 0.3.1'
 ]
 
@@ -20,9 +20,9 @@ extras_require = {
     # Test dependencies
     'tests': [
         'pylint',
-        'pytest-cov >= 1.8.0',
-        'dnslib >= 0.9.7',
-        'requests-mock >= 1.0.0',
+        'pytest-cov >= 2.10.1',
+        'dnslib >= 0.9.14',
+        'requests-mock >= 1.7.0',
     ]
 }
 
@@ -30,11 +30,8 @@ extras_require = {
 extras_require['tests-min'] = [dep.replace('>=', '==') for dep in extras_require['tests']]
 if os.getenv('ACMECHIEF_MIN_DEPS', False):
     install_requires = [dep.replace('>=', '==') for dep in install_requires]
-    # flask 1.0.2 doesn't play well with newer versions of jinja2, itsdangerous and werkzeug
-    install_requires.insert(0, 'werkzeug == 0.14.1')
-    install_requires.insert(0, 'itsdangerous == 0.24')
-    install_requires.insert(0, 'markupsafe == 1.1.0')
-    install_requires.insert(0, 'jinja2 == 2.10')
+    # flash 2.0.1 won't work with werkzeug >= 2.1, bullseye-backports ships 2.0.2
+    install_requires.insert(0, 'werkzeug == 2.0.2')
 
 setuptools.setup(
     name="acme-chief",
@@ -52,7 +49,7 @@ setuptools.setup(
         ]
     },
     classifiers=(
-        "Programming Language :: Python :: 3.7",
+        "Programming Language :: Python :: 3.9",
         "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
         "Operating System :: OS Independent",
     ),

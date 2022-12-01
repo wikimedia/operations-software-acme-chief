@@ -35,7 +35,7 @@ if os.getenv('ACMECHIEF_MIN_DEPS', False):
 
 setuptools.setup(
     name="acme-chief",
-    version="0.35",
+    version="0.36",
     author="Alex Monk",
     author_email="krenair@gmail.com",
     description="Python application to request certificates from ACME servers and distribute to authorised clients.",

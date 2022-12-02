@@ -1,3 +1,10 @@
+acme-chief (0.36-1) bullseye-wikimedia; urgency=medium
+
+  * initial release for bullseye
+  * set debhelper compat level to 13 and update debian/rules
+
+ -- Valentin Gutierrez <vgutierrez@wikimedia.org>  Fri, 02 Dec 2022 10:21:20 +0100
+
 acme-chief (0.35-1) buster-wikimedia; urgency=medium
 
   * limit jinja2, itsdangerous and werkzeug version

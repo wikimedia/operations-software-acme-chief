@@ -3,7 +3,7 @@ Maintainer: Alex Monk <krenair@gmail.com>
 Uploaders: Valentin Gutierrez <vgutierrez@wikimedia.org>
 Section: python
 Priority: optional
-Build-Depends: python3-setuptools, python3-all, debhelper (>= 10), dh-exec, dh-python
+Build-Depends: python3-setuptools, python3-all, debhelper-compat (= 13), dh-exec, dh-python
 Standards-Version: 4.2.1
 
 Package: acme-chief

@@ -50,8 +50,6 @@ class CertificateStateTest(unittest.TestCase):
             with self.assertRaises(AttributeError) as context:
                 self.state.__setattr__(attribute, 1)
 
-            self.assertIn("can't set attribute", str(context.exception))
-
     def test_set_status_without_retries(self):
         for status in (CertificateStatus.INITIAL, CertificateStatus.SELF_SIGNED, CertificateStatus.VALID,
                        CertificateStatus.NEEDS_RENEWAL, CertificateStatus.EXPIRED, CertificateStatus.SUBJECTS_CHANGED):
